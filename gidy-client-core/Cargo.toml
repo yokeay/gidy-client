@@ -5,7 +5,7 @@ edition.workspace = true
 description = "gidy client core library - SOCKS5 proxy + QUIC transport"
 
 [dependencies]
-gidy-core = { path = "../../gidy-core" }
+gidy-core = { git = "https://github.com/yokeay/gidy-core.git" }
 tokio = { version = "1", features = ["full"] }
 quinn = "0.11"
 bytes = "1"
