@@ -1,0 +1,5 @@
+psk_hex = "0000000000000000000000000000000000000000000000000000000000000000"
+server_addr = "127.0.0.1:4433"
+listen_addr = "127.0.0.1:1080"
+server_name = "localhost"
+log_level = "debug"

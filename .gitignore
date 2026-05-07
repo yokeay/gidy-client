@@ -1,0 +1,25 @@
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Certificates & key files
+*.pem
+*.key
+
+# Environment
+.env
+.env.*
+
+# Build artifacts
+*.exe

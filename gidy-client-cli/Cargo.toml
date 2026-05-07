@@ -1,0 +1,20 @@
+[package]
+name = "gidy-client-cli"
+version.workspace = true
+edition.workspace = true
+description = "gidy client CLI - Linux command-line proxy"
+
+[[bin]]
+name = "gidy-client"
+path = "src/main.rs"
+
+[dependencies]
+gidy-client-core = { path = "../gidy-client-core" }
+gidy-core = { path = "../../gidy-core" }
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
