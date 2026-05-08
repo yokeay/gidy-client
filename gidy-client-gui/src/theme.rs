@@ -9,7 +9,7 @@ pub fn apply_theme(ctx: &egui::Context) {
         override_text_color: Some(Color32::from_gray(230)),
         window_corner_radius: CornerRadius::same(12),
         window_shadow: egui::epaint::Shadow {
-            offset: [0, 8].into(),
+            offset: [0, 8],
             blur: 32,
             spread: 0,
             color: Color32::from_black_alpha(160),

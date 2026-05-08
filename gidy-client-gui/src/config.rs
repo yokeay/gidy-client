@@ -25,10 +25,10 @@ impl GuiConfig {
     pub fn load() -> Self {
         let config_path = std::env::current_exe()
             .ok()
-            .and_then(|p| {
+            .map(|p| {
                 let mut p = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
                 p.push("gidy-client.toml");
-                Some(p)
+                p
             })
             .unwrap_or_else(|| std::path::PathBuf::from("gidy-client.toml"));
 

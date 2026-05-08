@@ -153,7 +153,7 @@ impl GidyApp {
         }
 
         // Glow phase animation
-        self.glow_phase += ui.ctx().input(|i| i.unstable_dt) as f32 * 3.0;
+        self.glow_phase += ui.ctx().input(|i| i.unstable_dt) * 3.0;
 
         let (main_color, glow_color) = if self.running_cache || self.connected_cache {
             (GREEN_ON, GREEN_GLOW)
