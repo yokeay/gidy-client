@@ -1,9 +1,8 @@
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod imp {
-    use image::GenericImageView;
     use tray_icon::{
         TrayIcon, TrayIconBuilder, TrayIconEvent,
-        menu::{Menu, MenuEvent, MenuItem},
+        menu::{Menu, MenuEvent, MenuId, MenuItem},
     };
 
     const TRAY_ICON_PNG: &[u8] = include_bytes!("../assets/tray-icon.png");
@@ -19,8 +18,8 @@ mod imp {
 
     pub struct SystemTray {
         tray: Option<TrayIcon>,
-        menu_show_id: u32,
-        menu_exit_id: u32,
+        menu_show_id: MenuId,
+        menu_exit_id: MenuId,
     }
 
     #[derive(Debug, PartialEq)]
@@ -36,8 +35,8 @@ mod imp {
 
             let menu_show = MenuItem::new(show_label.to_string(), true, None);
             let menu_exit = MenuItem::new(exit_label.to_string(), true, None);
-            let menu_show_id = menu_show.id().as_u32();
-            let menu_exit_id = menu_exit.id().as_u32();
+            let menu_show_id = menu_show.id().clone();
+            let menu_exit_id = menu_exit.id().clone();
 
             let menu = Menu::new();
             menu.append(&menu_show).ok();
@@ -71,29 +70,22 @@ mod imp {
         pub fn poll_events(&self) -> TrayEvent {
             // Check menu events
             if let Ok(event) = MenuEvent::receiver().try_recv() {
-                let id = event.id.as_u32();
-                if id == self.menu_show_id {
+                if event.id == self.menu_show_id {
                     return TrayEvent::ShowWindow;
                 }
-                if id == self.menu_exit_id {
+                if event.id == self.menu_exit_id {
                     return TrayEvent::Exit;
                 }
             }
 
-            // Check tray icon click events (double-click to show)
+            // Check tray icon events (double-click to show)
             if let Ok(event) = TrayIconEvent::receiver().try_recv() {
-                if event.click_type == tray_icon::ClickType::Double {
+                if matches!(event, TrayIconEvent::DoubleClick { .. }) {
                     return TrayEvent::ShowWindow;
                 }
             }
 
             TrayEvent::None
-        }
-    }
-
-    impl Drop for SystemTray {
-        fn drop(&mut self) {
-            // TrayIcon is automatically removed when dropped
         }
     }
 }
