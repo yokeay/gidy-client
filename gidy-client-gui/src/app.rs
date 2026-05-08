@@ -142,7 +142,7 @@ impl GidyApp {
         if self.logo_texture.is_some() {
             return;
         }
-        let logo_bytes = include_bytes!("../../logo.png");
+        let logo_bytes = include_bytes!("../logo.png");
         if let Ok(img) = image::load_from_memory(logo_bytes) {
             let rgba = img.to_rgba8();
             let (w, h) = rgba.dimensions();
