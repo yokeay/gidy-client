@@ -30,15 +30,21 @@ jobs:
           - os: windows-latest
             artifact: gidy-client.exe
             name: gidy-client-windows-x86_64
+            package: gidy-client-cli
           - os: ubuntu-latest
             artifact: gidy-client
             name: gidy-client-linux-x86_64
+            package: gidy-client-cli
+          - os: windows-latest
+            artifact: gidy-client-gui.exe
+            name: gidy-client-gui-windows-x86_64
+            package: gidy-client-gui
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
-        run: cargo build --release -p gidy-client-cli
+        run: cargo build --release -p ${{ matrix.package }}
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -69,6 +75,7 @@ jobs:
           files: |
             artifacts/gidy-client-windows-x86_64/gidy-client.exe
             artifacts/gidy-client-linux-x86_64/gidy-client
+            artifacts/gidy-client-gui-windows-x86_64/gidy-client-gui.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

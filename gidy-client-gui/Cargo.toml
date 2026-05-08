@@ -1,0 +1,43 @@
+[package]
+name = "gidy-client-gui"
+version.workspace = true
+edition.workspace = true
+description = "gidy client GUI - Windows proxy application"
+
+[[bin]]
+name = "gidy-client-gui"
+path = "src/main.rs"
+
+[dependencies]
+gidy-client-core = { path = "../gidy-client-core" }
+gidy-core = { git = "https://github.com/yokeay/gidy-core.git" }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+eframe = "0.31"
+egui = "0.31"
+bytes = "1"
+chrono = "0.4"
+parking_lot = "0.12"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Com",
+    "Win32_Foundation",
+    "Win32_Networking_WinInet",
+    "Win32_Networking_WinSock",
+    "Win32_UI_Controls",
+    "Win32_Graphics_Dwm",
+    "Win32_System_Threading",
+    "Win32_System_Registry",
+    "Win32_Security",
+    "Win32_UI_Shell_Common",
+] }
+tray-icon = "0.19"
+winapi = "0.3"
