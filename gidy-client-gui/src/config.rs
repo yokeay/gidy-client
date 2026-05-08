@@ -1,6 +1,10 @@
 use crate::lang::Lang;
 use serde::{Deserialize, Serialize};
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuiConfig {
     pub psk_hex: String,
@@ -10,6 +14,12 @@ pub struct GuiConfig {
     pub log_level: String,
     #[serde(default = "Lang::detect")]
     pub language: Lang,
+    #[serde(default = "default_true")]
+    pub auto_start: bool,
+    #[serde(default = "default_true")]
+    pub auto_connect: bool,
+    #[serde(default = "default_true")]
+    pub minimize_to_tray: bool,
 }
 
 impl Default for GuiConfig {
@@ -21,6 +31,9 @@ impl Default for GuiConfig {
             listen_addr: "127.0.0.1:1080".into(),
             log_level: "info".into(),
             language: Lang::detect(),
+            auto_start: true,
+            auto_connect: true,
+            minimize_to_tray: true,
         }
     }
 }

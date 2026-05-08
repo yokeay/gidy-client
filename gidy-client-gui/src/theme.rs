@@ -115,3 +115,10 @@ pub const RED_OFF: Color32 = Color32::from_rgb(220, 80, 80);
 
 /// Accent color
 pub const ACCENT_BLUE: Color32 = Color32::from_rgb(100, 160, 240);
+
+/// Chart line colors
+pub const CHART_UP: Color32 = GREEN_ON;
+pub const CHART_DOWN: Color32 = ACCENT_BLUE;
+pub const CHART_UP_FILL: Color32 = Color32::from_rgba_premultiplied(80, 220, 120, 40);
+pub const CHART_DOWN_FILL: Color32 = Color32::from_rgba_premultiplied(100, 160, 240, 40);
+pub const CHART_GRID: Color32 = Color32::from_rgba_premultiplied(255, 255, 255, 15);
