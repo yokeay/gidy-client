@@ -2,8 +2,10 @@
 
 mod app;
 mod config;
+mod lang;
 mod proxy;
 mod theme;
+mod tray;
 mod win_proxy;
 
 use std::sync::Arc;
@@ -55,6 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "gidy-client",
         native_options,
         Box::new(|cc| {
+            theme::setup_fonts(&cc.egui_ctx);
             theme::apply_theme(&cc.egui_ctx);
             Ok(Box::new(app))
         }),

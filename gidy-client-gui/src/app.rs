@@ -1,6 +1,8 @@
 use crate::config::GuiConfig;
+use crate::lang::{Lang, TextKey};
 use crate::proxy::ProxyManager;
 use crate::theme::{self, ACCENT_BLUE, GREEN_GLOW, GREEN_ON, RED_GLOW, RED_OFF};
+use crate::tray::{SystemTray, TrayEvent};
 use egui::{Color32, Pos2, RichText, Stroke, Vec2};
 use std::sync::Arc;
 use std::time::Instant;
@@ -10,6 +12,14 @@ use tokio::runtime::Runtime;
 enum Tab {
     Config,
     Monitor,
+}
+
+#[derive(PartialEq)]
+enum CloseAction {
+    None,
+    ShowDialog,
+    MinimizeToTray,
+    Exit,
 }
 
 pub struct GidyApp {
@@ -27,6 +37,9 @@ pub struct GidyApp {
     status_message: String,
     status_error: bool,
 
+    // i18n
+    lang: Lang,
+
     // Log buffer
     log_lines: Vec<(String, Color32)>,
 
@@ -39,6 +52,10 @@ pub struct GidyApp {
 
     // Config dirty flag
     config_dirty: bool,
+
+    // System tray
+    system_tray: SystemTray,
+    close_action: CloseAction,
 }
 
 impl GidyApp {
@@ -48,6 +65,13 @@ impl GidyApp {
         let server_name = config.server_name.clone();
         let listen_addr = config.listen_addr.clone();
         let log_level = config.log_level.clone();
+        let lang = config.language;
+
+        let system_tray = SystemTray::new(
+            lang.text(TextKey::TrayShowWindow),
+            lang.text(TextKey::TrayExit),
+            lang.text(TextKey::TrayTooltip),
+        );
 
         Self {
             config,
@@ -59,8 +83,9 @@ impl GidyApp {
             server_name,
             listen_addr,
             log_level,
-            status_message: String::from("准备就绪"),
+            status_message: lang.text(TextKey::Ready).into(),
             status_error: false,
+            lang,
             log_lines: Vec::new(),
             glow_phase: 0.0,
             last_stats_update: Instant::now(),
@@ -68,6 +93,8 @@ impl GidyApp {
             connected_cache: false,
             running_cache: false,
             config_dirty: false,
+            system_tray,
+            close_action: CloseAction::None,
         }
     }
 
@@ -80,7 +107,7 @@ impl GidyApp {
 
     fn toggle_proxy(&mut self) {
         if self.running_cache {
-            self.add_log("正在停止代理...", Color32::from_gray(180));
+            self.add_log(self.lang.text(TextKey::Stopping), Color32::from_gray(180));
             let mgr = self.proxy_mgr.clone();
             let rt = self.rt.clone();
             rt.spawn(async move {
@@ -88,9 +115,9 @@ impl GidyApp {
             });
             self.running_cache = false;
             self.connected_cache = false;
-            self.status_message = "已停止".into();
+            self.status_message = self.lang.text(TextKey::Stopped).into();
             self.status_error = false;
-            self.add_log("代理已停止", Color32::from_gray(180));
+            self.add_log(self.lang.text(TextKey::ProxyStopped), Color32::from_gray(180));
         } else {
             // Apply config changes
             self.config.psk_hex = self.psk_input.clone();
@@ -98,10 +125,11 @@ impl GidyApp {
             self.config.server_name = self.server_name.clone();
             self.config.listen_addr = self.listen_addr.clone();
             self.config.log_level = self.log_level.clone();
+            self.config.language = self.lang;
             self.config_dirty = false;
 
-            self.add_log("正在启动代理...", ACCENT_BLUE);
-            self.status_message = "连接中...".into();
+            self.add_log(self.lang.text(TextKey::Starting), ACCENT_BLUE);
+            self.status_message = self.lang.text(TextKey::Connecting).into();
             self.status_error = false;
 
             let mgr = self.proxy_mgr.clone();
@@ -118,7 +146,7 @@ impl GidyApp {
             });
             self.running_cache = true;
             self.connected_cache = true;
-            self.add_log("代理已启动", Color32::from_rgb(80, 220, 120));
+            self.add_log(self.lang.text(TextKey::ProxyStarted), Color32::from_rgb(80, 220, 120));
         }
     }
 
@@ -287,19 +315,19 @@ impl GidyApp {
     fn render_config_tab(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
 
-        ui.label(RichText::new("PSK 密钥").color(Color32::from_gray(200)));
+        ui.label(RichText::new(self.lang.text(TextKey::PskLabel)).color(Color32::from_gray(200)));
         let psk_resp = ui.add_sized(
             [ui.available_width(), 32.0],
             egui::TextEdit::singleline(&mut self.psk_input)
                 .password(true)
-                .hint_text("64位十六进制字符"),
+                .hint_text(self.lang.text(TextKey::PskHint)),
         );
         if psk_resp.changed() {
             self.config_dirty = true;
         }
         ui.add_space(4.0);
 
-        ui.label(RichText::new("服务器地址").color(Color32::from_gray(200)));
+        ui.label(RichText::new(self.lang.text(TextKey::ServerAddrLabel)).color(Color32::from_gray(200)));
         let addr_resp = ui.add_sized(
             [ui.available_width(), 32.0],
             egui::TextEdit::singleline(&mut self.server_addr).hint_text("ip:port"),
@@ -309,7 +337,7 @@ impl GidyApp {
         }
         ui.add_space(4.0);
 
-        ui.label(RichText::new("SNI / 服务器名称").color(Color32::from_gray(200)));
+        ui.label(RichText::new(self.lang.text(TextKey::SniLabel)).color(Color32::from_gray(200)));
         let name_resp = ui.add_sized(
             [ui.available_width(), 32.0],
             egui::TextEdit::singleline(&mut self.server_name).hint_text("localhost"),
@@ -319,7 +347,7 @@ impl GidyApp {
         }
         ui.add_space(4.0);
 
-        ui.label(RichText::new("本地监听地址").color(Color32::from_gray(200)));
+        ui.label(RichText::new(self.lang.text(TextKey::ListenAddrLabel)).color(Color32::from_gray(200)));
         let listen_resp = ui.add_sized(
             [ui.available_width(), 32.0],
             egui::TextEdit::singleline(&mut self.listen_addr).hint_text("127.0.0.1:1080"),
@@ -329,7 +357,7 @@ impl GidyApp {
         }
         ui.add_space(4.0);
 
-        ui.label(RichText::new("日志级别").color(Color32::from_gray(200)));
+        ui.label(RichText::new(self.lang.text(TextKey::LogLevelLabel)).color(Color32::from_gray(200)));
         egui::ComboBox::from_id_salt("log_level")
             .selected_text(&self.log_level)
             .show_ui(ui, |ui| {
@@ -341,6 +369,24 @@ impl GidyApp {
                     );
                     if resp.changed() {
                         self.config_dirty = true;
+                    }
+                }
+            });
+
+        ui.add_space(8.0);
+        ui.label(RichText::new(self.lang.text(TextKey::Language)).color(Color32::from_gray(200)));
+        egui::ComboBox::from_id_salt("language")
+            .selected_text(match self.lang {
+                Lang::Zh => "中文",
+                Lang::En => "English",
+            })
+            .show_ui(ui, |ui| {
+                for (label, val) in &[("English", Lang::En), ("中文", Lang::Zh)] {
+                    let resp = ui.selectable_value(&mut self.lang, *val, *label);
+                    if resp.changed() {
+                        self.config_dirty = true;
+                        // Update status message immediately on language change
+                        self.status_message = self.lang.text(TextKey::Ready).into();
                     }
                 }
             });
@@ -380,7 +426,7 @@ impl GidyApp {
         let snapshot = self.proxy_mgr.stats().snapshot();
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("总上传：")
+                RichText::new(self.lang.text(TextKey::TotalUpload))
                     .size(13.0)
                     .color(Color32::from_gray(180)),
             );
@@ -391,7 +437,7 @@ impl GidyApp {
             );
             ui.add_space(20.0);
             ui.label(
-                RichText::new("总下载：")
+                RichText::new(self.lang.text(TextKey::TotalDownload))
                     .size(13.0)
                     .color(Color32::from_gray(180)),
             );
@@ -403,7 +449,7 @@ impl GidyApp {
         });
         ui.add_space(2.0);
         ui.label(
-            RichText::new(format!("运行时间：{} 秒", snapshot.uptime_secs))
+            RichText::new(format!("{}{}", self.lang.text(TextKey::Uptime), snapshot.uptime_secs))
                 .size(13.0)
                 .color(Color32::from_gray(150)),
         );
@@ -414,7 +460,7 @@ impl GidyApp {
 
         // Log window
         ui.label(
-            RichText::new("事件日志")
+            RichText::new(self.lang.text(TextKey::EventLog))
                 .size(13.0)
                 .color(Color32::from_gray(180)),
         );
@@ -438,17 +484,50 @@ impl GidyApp {
 
 impl eframe::App for GidyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Update running state from proxy manager
-        // (in this simple version, we track via local cache)
+        // ---- Close interception ----
+        if ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.close_action = CloseAction::ShowDialog;
+        }
+
+        // ---- Tray event polling ----
+        match self.system_tray.poll_events() {
+            TrayEvent::ShowWindow => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                self.system_tray.set_visible(false);
+            }
+            TrayEvent::Exit => {
+                self.close_action = CloseAction::Exit;
+            }
+            TrayEvent::None => {}
+        }
+
+        // ---- Handle close action ----
+        match self.close_action {
+            CloseAction::Exit => {
+                self.system_tray.set_visible(false);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                self.close_action = CloseAction::None;
+                return;
+            }
+            CloseAction::MinimizeToTray => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                self.system_tray.set_visible(true);
+                self.close_action = CloseAction::None;
+            }
+            CloseAction::None | CloseAction::ShowDialog => {}
+        }
+
+        // ---- Theme ----
         theme::apply_theme(ctx);
 
-        // Central panel
+        // ---- Main UI ----
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Title bar area
             ui.add_space(8.0);
             ui.vertical_centered(|ui| {
                 ui.label(
-                    RichText::new("gidy client")
+                    RichText::new(self.lang.text(TextKey::Title))
                         .size(16.0)
                         .color(Color32::from_gray(200)),
                 );
@@ -481,14 +560,14 @@ impl eframe::App for GidyApp {
             // Tabs
             ui.horizontal(|ui| {
                 let config_text = if self.tab == Tab::Config {
-                    RichText::new("⚙ 系统配置").color(ACCENT_BLUE)
+                    RichText::new(format!("⚙ {}", self.lang.text(TextKey::ConfigTab))).color(ACCENT_BLUE)
                 } else {
-                    RichText::new("⚙ 系统配置").color(Color32::from_gray(160))
+                    RichText::new(format!("⚙ {}", self.lang.text(TextKey::ConfigTab))).color(Color32::from_gray(160))
                 };
                 let monitor_text = if self.tab == Tab::Monitor {
-                    RichText::new("📊 流量监测").color(ACCENT_BLUE)
+                    RichText::new(format!("📊 {}", self.lang.text(TextKey::MonitorTab))).color(ACCENT_BLUE)
                 } else {
-                    RichText::new("📊 流量监测").color(Color32::from_gray(160))
+                    RichText::new(format!("📊 {}", self.lang.text(TextKey::MonitorTab))).color(Color32::from_gray(160))
                 };
 
                 if ui
@@ -519,5 +598,35 @@ impl eframe::App for GidyApp {
                 Tab::Monitor => self.render_monitor_tab(ui),
             }
         });
+
+        // ---- Close dialog (modal) ----
+        if self.close_action == CloseAction::ShowDialog {
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("close_dialog"),
+                egui::ViewportBuilder::default()
+                    .with_title(self.lang.text(TextKey::CloseDialogTitle))
+                    .with_inner_size([300.0, 120.0])
+                    .with_resizable(false),
+                |ctx, _class| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.add_space(12.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(self.lang.text(TextKey::CloseDialogText));
+                        });
+                        ui.add_space(12.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button(self.lang.text(TextKey::CloseDialogNo)).clicked() {
+                                    self.close_action = CloseAction::Exit;
+                                }
+                                if ui.button(self.lang.text(TextKey::CloseDialogYes)).clicked() {
+                                    self.close_action = CloseAction::MinimizeToTray;
+                                }
+                            });
+                        });
+                    });
+                },
+            );
+        }
     }
 }

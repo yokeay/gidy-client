@@ -1,3 +1,4 @@
+use crate::lang::Lang;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -7,6 +8,8 @@ pub struct GuiConfig {
     pub server_name: String,
     pub listen_addr: String,
     pub log_level: String,
+    #[serde(default = "Lang::detect")]
+    pub language: Lang,
 }
 
 impl Default for GuiConfig {
@@ -17,6 +20,7 @@ impl Default for GuiConfig {
             server_name: "localhost".into(),
             listen_addr: "127.0.0.1:1080".into(),
             log_level: "info".into(),
+            language: Lang::detect(),
         }
     }
 }

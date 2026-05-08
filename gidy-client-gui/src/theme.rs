@@ -1,5 +1,36 @@
 use egui::{Color32, CornerRadius, Stroke, Style, Visuals};
 
+pub fn setup_fonts(ctx: &egui::Context) {
+    #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
+    let mut fonts = egui::FontDefinitions::default();
+
+    #[cfg(target_os = "windows")]
+    {
+        let cjk_paths = [
+            "C:\\Windows\\Fonts\\msyh.ttc",
+            "C:\\Windows\\Fonts\\simhei.ttf",
+            "C:\\Windows\\Fonts\\simsun.ttc",
+        ];
+        for path in &cjk_paths {
+            if let Ok(data) = std::fs::read(path) {
+                fonts.font_data.insert(
+                    "cjk".to_owned(),
+                    egui::FontData::from_owned(data),
+                );
+                fonts
+                    .families
+                    .get_mut(&egui::FontFamily::Proportional)
+                    .unwrap()
+                    .insert(0, "cjk".to_owned());
+                tracing::info!("Loaded CJK font from {}", path);
+                break;
+            }
+        }
+    }
+
+    ctx.set_fonts(fonts);
+}
+
 pub fn apply_theme(ctx: &egui::Context) {
     let mut style = Style::default();
 

@@ -24,6 +24,10 @@ bytes = "1"
 chrono = "0.4"
 parking_lot = "0.12"
 
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+tray-icon = "0.19"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_UI_Shell",
@@ -39,5 +43,4 @@ windows = { version = "0.58", features = [
     "Win32_Security",
     "Win32_UI_Shell_Common",
 ] }
-tray-icon = "0.19"
 winapi = "0.3"

@@ -1669,7 +1669,7 @@ dependencies = [
 
 [[package]]
 name = "gidy-client-cli"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "gidy-client-core",
@@ -1685,7 +1685,7 @@ dependencies = [
 
 [[package]]
 name = "gidy-client-core"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "blake3",
  "bytes",
@@ -1707,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "gidy-client-gui"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "bytes",
  "chrono",
@@ -1715,6 +1715,7 @@ dependencies = [
  "egui",
  "gidy-client-core",
  "gidy-core",
+ "image",
  "parking_lot",
  "serde",
  "serde_json",
