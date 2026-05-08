@@ -1,3 +1,5 @@
+mod win_proxy;
+
 use clap::{Parser, Subcommand};
 use gidy_client_core::{ClientConfig, GidyClient, Socks5Server, TrafficStats};
 use tracing::{info, error};
@@ -70,6 +72,15 @@ async fn run(config: ClientConfig) -> Result<(), String> {
     info!("server: {}", config.server_addr);
     info!("proxy listen: {}", listen_addr);
 
+    // Ctrl+C handler to clean up system proxy on exit
+    tokio::spawn(async {
+        if let Ok(()) = tokio::signal::ctrl_c().await {
+            info!("ctrl+c received, clearing system proxy...");
+            win_proxy::clear_proxy();
+            std::process::exit(0);
+        }
+    });
+
     let stats = TrafficStats::new();
 
     // Spawn stats reporter once
@@ -97,21 +108,29 @@ async fn run(config: ClientConfig) -> Result<(), String> {
         match client.connect().await {
             Ok(conn) => {
                 info!("connected, starting SOCKS5 proxy...");
+
+                // Auto-configure Windows system proxy
+                let proxy_addr = format!("socks=127.0.0.1:{}", config.listen_addr.port());
+                win_proxy::set_proxy(&proxy_addr);
+
                 let proxy = Socks5Server::new(listen_addr.clone(), conn, stats.clone());
 
                 match proxy.run().await {
                     Err(e) => {
                         error!("proxy error: {}", e);
+                        win_proxy::clear_proxy();
                         info!("reconnecting in 5 seconds...");
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     }
                     Ok(()) => {
                         info!("proxy stopped normally");
+                        win_proxy::clear_proxy();
                     }
                 }
             }
             Err(e) => {
                 error!("connection failed: {}", e);
+                win_proxy::clear_proxy();
                 info!("retrying in 5 seconds...");
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
