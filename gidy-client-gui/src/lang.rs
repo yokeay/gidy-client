@@ -24,12 +24,9 @@ impl Lang {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextKey {
-    Ready,
     Stopping,
-    Stopped,
     ProxyStopped,
     Starting,
-    Connecting,
     ProxyStarted,
     PskLabel,
     PskHint,
@@ -38,7 +35,6 @@ pub enum TextKey {
     ListenAddrLabel,
     LogLevelLabel,
     ConfigTab,
-    MonitorTab,
     TotalUpload,
     TotalDownload,
     Uptime,
@@ -58,12 +54,9 @@ impl Lang {
     pub fn text(self, key: TextKey) -> &'static str {
         match self {
             Lang::En => match key {
-                TextKey::Ready => "Ready",
                 TextKey::Stopping => "Stopping proxy...",
-                TextKey::Stopped => "Stopped",
                 TextKey::ProxyStopped => "Proxy stopped",
                 TextKey::Starting => "Starting proxy...",
-                TextKey::Connecting => "Connecting...",
                 TextKey::ProxyStarted => "Proxy started",
                 TextKey::PskLabel => "PSK Key",
                 TextKey::PskHint => "64 hex characters",
@@ -72,7 +65,6 @@ impl Lang {
                 TextKey::ListenAddrLabel => "Listen Address",
                 TextKey::LogLevelLabel => "Log Level",
                 TextKey::ConfigTab => "Config",
-                TextKey::MonitorTab => "Monitor",
                 TextKey::TotalUpload => "Upload:",
                 TextKey::TotalDownload => "Download:",
                 TextKey::Uptime => "Uptime:",
@@ -88,12 +80,9 @@ impl Lang {
                 TextKey::CloseDialogNo => "No",
             },
             Lang::Zh => match key {
-                TextKey::Ready => "准备就绪",
                 TextKey::Stopping => "正在停止代理...",
-                TextKey::Stopped => "已停止",
                 TextKey::ProxyStopped => "代理已停止",
                 TextKey::Starting => "正在启动代理...",
-                TextKey::Connecting => "连接中...",
                 TextKey::ProxyStarted => "代理已启动",
                 TextKey::PskLabel => "PSK 密钥",
                 TextKey::PskHint => "64位十六进制字符",
@@ -102,7 +91,6 @@ impl Lang {
                 TextKey::ListenAddrLabel => "本地监听地址",
                 TextKey::LogLevelLabel => "日志级别",
                 TextKey::ConfigTab => "系统配置",
-                TextKey::MonitorTab => "流量监测",
                 TextKey::TotalUpload => "总上传：",
                 TextKey::TotalDownload => "总下载：",
                 TextKey::Uptime => "运行时间：",

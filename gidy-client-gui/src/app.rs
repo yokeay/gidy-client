@@ -9,12 +9,6 @@ use std::time::Instant;
 use tokio::runtime::Runtime;
 
 #[derive(PartialEq)]
-enum Tab {
-    Config,
-    Monitor,
-}
-
-#[derive(PartialEq)]
 enum CloseAction {
     None,
     ShowDialog,
@@ -28,13 +22,11 @@ pub struct GidyApp {
     rt: Arc<Runtime>,
 
     // UI state
-    tab: Tab,
     psk_input: String,
     server_addr: String,
     server_name: String,
     listen_addr: String,
     log_level: String,
-    status_message: String,
     status_error: bool,
 
     // i18n
@@ -48,7 +40,8 @@ pub struct GidyApp {
     connected_cache: bool,
     running_cache: bool,
 
-    // Config dirty flag
+    // Config
+    show_config: bool,
     config_dirty: bool,
 
     // System tray
@@ -78,13 +71,11 @@ impl GidyApp {
             config,
             proxy_mgr,
             rt: Arc::new(rt),
-            tab: Tab::Monitor,
             psk_input: psk,
             server_addr,
             server_name,
             listen_addr,
             log_level,
-            status_message: lang.text(TextKey::Ready).into(),
             status_error: false,
             lang,
             log_lines: Vec::new(),
@@ -92,6 +83,7 @@ impl GidyApp {
             stats_text: String::new(),
             connected_cache: false,
             running_cache: false,
+            show_config: false,
             config_dirty: false,
             system_tray,
             close_action: CloseAction::None,
@@ -120,7 +112,6 @@ impl GidyApp {
             });
             self.running_cache = false;
             self.connected_cache = false;
-            self.status_message = self.lang.text(TextKey::Stopped).into();
             self.status_error = false;
             self.add_log(self.lang.text(TextKey::ProxyStopped), Color32::from_gray(180));
         } else {
@@ -148,7 +139,6 @@ impl GidyApp {
             });
 
             self.add_log(self.lang.text(TextKey::Starting), ACCENT_BLUE);
-            self.status_message = self.lang.text(TextKey::Connecting).into();
             self.status_error = false;
             self.running_cache = true;
             self.connected_cache = true;
@@ -176,6 +166,19 @@ impl GidyApp {
         }
     }
 
+    fn refresh_stats(&mut self) {
+        if self.last_stats_update.elapsed().as_millis() > 500 {
+            let snapshot = self.proxy_mgr.stats().snapshot();
+            self.connected_cache = snapshot.connected;
+            self.stats_text = format!(
+                "↑ {}  ↓ {}",
+                Self::format_speed(snapshot.speed_up_kbps),
+                Self::format_speed(snapshot.speed_down_kbps),
+            );
+            self.last_stats_update = Instant::now();
+        }
+    }
+
     fn render_status_indicator(&mut self, ui: &mut egui::Ui) {
         let desired_size = Vec2::splat(180.0);
         let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
@@ -186,24 +189,24 @@ impl GidyApp {
             self.toggle_proxy();
         }
 
-        // Simple color states
-        let circle_color = if self.running_cache || self.connected_cache {
+        let circle_color = if self.connected_cache {
             GREEN_ON
+        } else if self.running_cache {
+            Color32::from_rgb(255, 180, 60)
+        } else if self.status_error {
+            RED_OFF
         } else {
-            // Ready state: moonlit white
             Color32::from_gray(210)
         };
 
         let painter = ui.painter();
 
-        // Shadow (dark circle offset slightly)
         painter.circle_filled(
             center + Vec2::new(0.0, radius * 0.08),
             radius,
             Color32::from_black_alpha(80),
         );
 
-        // Main circle with subtle edge
         painter.circle_filled(center, radius, circle_color);
         painter.circle_stroke(
             center,
@@ -216,175 +219,136 @@ impl GidyApp {
         }
     }
 
-    fn render_config_tab(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(8.0);
+    fn render_config_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_config;
+        egui::Window::new(self.lang.text(TextKey::ConfigTab))
+            .id(egui::Id::new("config_window"))
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_min_width(320.0);
 
-        ui.label(RichText::new(self.lang.text(TextKey::PskLabel)).color(Color32::from_gray(200)));
-        let psk_resp = ui.add_sized(
-            [ui.available_width(), 32.0],
-            egui::TextEdit::singleline(&mut self.psk_input)
-                .password(true)
-                .hint_text(self.lang.text(TextKey::PskHint)),
-        );
-        if psk_resp.changed() {
-            self.config_dirty = true;
-        }
-        ui.add_space(4.0);
+                ui.add_space(4.0);
+                ui.label(RichText::new(self.lang.text(TextKey::PskLabel)).color(Color32::from_gray(200)));
+                let psk_resp = ui.add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::TextEdit::singleline(&mut self.psk_input)
+                        .password(true)
+                        .hint_text(self.lang.text(TextKey::PskHint)),
+                );
+                if psk_resp.changed() {
+                    self.config_dirty = true;
+                }
+                ui.add_space(4.0);
 
-        ui.label(RichText::new(self.lang.text(TextKey::ServerAddrLabel)).color(Color32::from_gray(200)));
-        let addr_resp = ui.add_sized(
-            [ui.available_width(), 32.0],
-            egui::TextEdit::singleline(&mut self.server_addr).hint_text("ip:port"),
-        );
-        if addr_resp.changed() {
-            self.config_dirty = true;
-        }
-        ui.add_space(4.0);
+                ui.label(RichText::new(self.lang.text(TextKey::ServerAddrLabel)).color(Color32::from_gray(200)));
+                let addr_resp = ui.add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::TextEdit::singleline(&mut self.server_addr).hint_text("ip:port"),
+                );
+                if addr_resp.changed() {
+                    self.config_dirty = true;
+                }
+                ui.add_space(4.0);
 
-        ui.label(RichText::new(self.lang.text(TextKey::SniLabel)).color(Color32::from_gray(200)));
-        let name_resp = ui.add_sized(
-            [ui.available_width(), 32.0],
-            egui::TextEdit::singleline(&mut self.server_name).hint_text("gidy.example.com"),
-        );
-        if name_resp.changed() {
-            self.config_dirty = true;
-        }
-        ui.add_space(4.0);
+                ui.label(RichText::new(self.lang.text(TextKey::SniLabel)).color(Color32::from_gray(200)));
+                let name_resp = ui.add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::TextEdit::singleline(&mut self.server_name).hint_text("gidy.example.com"),
+                );
+                if name_resp.changed() {
+                    self.config_dirty = true;
+                }
+                ui.add_space(4.0);
 
-        ui.label(RichText::new(self.lang.text(TextKey::ListenAddrLabel)).color(Color32::from_gray(200)));
-        let listen_resp = ui.add_sized(
-            [ui.available_width(), 32.0],
-            egui::TextEdit::singleline(&mut self.listen_addr).hint_text("127.0.0.1:1080"),
-        );
-        if listen_resp.changed() {
-            self.config_dirty = true;
-        }
-        ui.add_space(4.0);
+                ui.label(RichText::new(self.lang.text(TextKey::ListenAddrLabel)).color(Color32::from_gray(200)));
+                let listen_resp = ui.add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::TextEdit::singleline(&mut self.listen_addr).hint_text("127.0.0.1:1080"),
+                );
+                if listen_resp.changed() {
+                    self.config_dirty = true;
+                }
+                ui.add_space(4.0);
 
-        ui.label(RichText::new(self.lang.text(TextKey::LogLevelLabel)).color(Color32::from_gray(200)));
-        egui::ComboBox::from_id_salt("log_level")
-            .selected_text(&self.log_level)
-            .show_ui(ui, |ui| {
-                for level in &["trace", "debug", "info", "warn", "error"] {
-                    let resp = ui.selectable_value(
-                        &mut self.log_level,
-                        level.to_string(),
-                        *level,
-                    );
-                    if resp.changed() {
-                        self.config_dirty = true;
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(self.lang.text(TextKey::LogLevelLabel)).color(Color32::from_gray(200)));
+                    egui::ComboBox::from_id_salt("log_level")
+                        .selected_text(&self.log_level)
+                        .width(80.0)
+                        .show_ui(ui, |ui| {
+                            for level in &["trace", "debug", "info", "warn", "error"] {
+                                let resp = ui.selectable_value(
+                                    &mut self.log_level,
+                                    level.to_string(),
+                                    *level,
+                                );
+                                if resp.changed() {
+                                    self.config_dirty = true;
+                                }
+                            }
+                        });
+
+                    ui.add_space(12.0);
+
+                    ui.label(RichText::new(self.lang.text(TextKey::Language)).color(Color32::from_gray(200)));
+                    egui::ComboBox::from_id_salt("language")
+                        .selected_text(match self.lang {
+                            Lang::Zh => "中文",
+                            Lang::En => "English",
+                        })
+                        .width(80.0)
+                        .show_ui(ui, |ui| {
+                            for (label, val) in &[("English", Lang::En), ("中文", Lang::Zh)] {
+                                let resp = ui.selectable_value(&mut self.lang, *val, *label);
+                                if resp.changed() {
+                                    self.config_dirty = true;
+                                    self.add_log("Language changed", Color32::from_gray(180));
+                                }
+                            }
+                        });
+                });
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        self.config.psk_hex = self.psk_input.clone();
+                        self.config.server_addr = self.server_addr.clone();
+                        self.config.server_name = self.server_name.clone();
+                        self.config.listen_addr = self.listen_addr.clone();
+                        self.config.log_level = self.log_level.clone();
+                        self.config.language = self.lang;
+                        self.config_dirty = false;
+                        self.show_config = false;
+                        self.add_log("Config saved", Color32::from_gray(180));
                     }
-                }
-            });
-
-        ui.add_space(8.0);
-        ui.label(RichText::new(self.lang.text(TextKey::Language)).color(Color32::from_gray(200)));
-        egui::ComboBox::from_id_salt("language")
-            .selected_text(match self.lang {
-                Lang::Zh => "中文",
-                Lang::En => "English",
-            })
-            .show_ui(ui, |ui| {
-                for (label, val) in &[("English", Lang::En), ("中文", Lang::Zh)] {
-                    let resp = ui.selectable_value(&mut self.lang, *val, *label);
-                    if resp.changed() {
-                        self.config_dirty = true;
-                        self.status_message = self.lang.text(TextKey::Ready).into();
-                        self.add_log("Language changed", Color32::from_gray(180));
+                    if ui.button("Cancel").clicked() {
+                        self.psk_input = self.config.psk_hex.clone();
+                        self.server_addr = self.config.server_addr.clone();
+                        self.server_name = self.config.server_name.clone();
+                        self.listen_addr = self.config.listen_addr.clone();
+                        self.log_level = self.config.log_level.clone();
+                        self.lang = self.config.language;
+                        self.config_dirty = false;
+                        self.show_config = false;
                     }
-                }
+                });
             });
-    }
 
-    fn render_monitor_tab(&mut self, ui: &mut egui::Ui) {
-        if self.last_stats_update.elapsed().as_millis() > 500 {
-            let snapshot = self.proxy_mgr.stats().snapshot();
-            self.connected_cache = snapshot.connected;
-            self.stats_text = format!(
-                "↑ {}  ↓ {}",
-                Self::format_speed(snapshot.speed_up_kbps),
-                Self::format_speed(snapshot.speed_down_kbps),
-            );
-            self.last_stats_update = Instant::now();
+        if !open {
+            self.show_config = false;
         }
-
-        ui.add_space(8.0);
-
-        let speed_color = if self.connected_cache {
-            GREEN_ON
-        } else {
-            Color32::from_gray(120)
-        };
-        ui.vertical_centered(|ui| {
-            ui.label(
-                RichText::new(&self.stats_text)
-                    .size(22.0)
-                    .color(speed_color),
-            );
-        });
-        ui.add_space(4.0);
-
-        let snapshot = self.proxy_mgr.stats().snapshot();
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(self.lang.text(TextKey::TotalUpload))
-                    .size(13.0)
-                    .color(Color32::from_gray(180)),
-            );
-            ui.label(
-                RichText::new(Self::format_bytes(snapshot.bytes_up))
-                    .size(13.0)
-                    .color(Color32::from_gray(220)),
-            );
-            ui.add_space(20.0);
-            ui.label(
-                RichText::new(self.lang.text(TextKey::TotalDownload))
-                    .size(13.0)
-                    .color(Color32::from_gray(180)),
-            );
-            ui.label(
-                RichText::new(Self::format_bytes(snapshot.bytes_down))
-                    .size(13.0)
-                    .color(Color32::from_gray(220)),
-            );
-        });
-        ui.add_space(2.0);
-        ui.label(
-            RichText::new(format!("{}{}", self.lang.text(TextKey::Uptime), snapshot.uptime_secs))
-                .size(13.0)
-                .color(Color32::from_gray(150)),
-        );
-
-        ui.add_space(8.0);
-        ui.separator();
-        ui.add_space(4.0);
-
-        ui.label(
-            RichText::new(self.lang.text(TextKey::EventLog))
-                .size(13.0)
-                .color(Color32::from_gray(180)),
-        );
-
-        let log_height = ui.available_height() - 16.0;
-        egui::ScrollArea::vertical()
-            .max_height(log_height)
-            .auto_shrink([false, false])
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                for (line, color) in &self.log_lines {
-                    ui.label(
-                        RichText::new(line)
-                            .size(12.0)
-                            .color(*color),
-                    );
-                }
-            });
     }
 }
 
 impl eframe::App for GidyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Tray event polling (runs even when hidden via repaint loop)
+        // Tray event polling
         match self.system_tray.poll_events() {
             TrayEvent::ShowWindow => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -399,7 +363,7 @@ impl eframe::App for GidyApp {
             TrayEvent::None => {}
         }
 
-        // Close interception — only show dialog if NOT force exit
+        // Close interception
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.close_action == CloseAction::ForceExit {
                 // Let it close
@@ -423,82 +387,140 @@ impl eframe::App for GidyApp {
                 self.system_tray.set_visible(true);
                 self.close_action = CloseAction::None;
                 self.add_log("Minimized to tray", Color32::from_gray(180));
-                // Keep repaint loop alive for tray events
                 ctx.request_repaint();
             }
             CloseAction::None | CloseAction::ShowDialog => {}
         }
 
-        // Track main window rect for centering dialog
+        // Track main window rect
         self.main_rect = ctx.input(|i| i.viewport().outer_rect);
+
+        // Refresh stats periodically
+        self.refresh_stats();
 
         theme::apply_theme(ctx);
 
+        // --- Main UI ---
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(8.0);
-            ui.vertical_centered(|ui| {
+            // Row 1: title (left) + settings gear (right)
+            ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(self.lang.text(TextKey::Title))
-                        .size(16.0)
-                        .color(Color32::from_gray(200)),
+                        .size(14.0)
+                        .color(Color32::from_gray(180)),
                 );
-            });
-            ui.add_space(4.0);
-
-            if !self.status_message.is_empty() {
-                let color = if self.status_error {
-                    RED_OFF
-                } else if self.connected_cache {
-                    GREEN_ON
-                } else {
-                    Color32::from_gray(180)
-                };
-                ui.vertical_centered(|ui| {
-                    ui.label(RichText::new(&self.status_message).size(12.0).color(color));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let gear_btn = egui::Button::new(
+                        RichText::new("⚙").size(16.0).color(Color32::from_gray(180)),
+                    )
+                    .fill(Color32::TRANSPARENT)
+                    .min_size(Vec2::splat(28.0));
+                    if ui.add(gear_btn).clicked() {
+                        self.show_config = !self.show_config;
+                        if self.show_config {
+                            self.add_log("Config opened", Color32::from_gray(180));
+                        }
+                    }
+                    if self.config_dirty {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("●").size(8.0).color(Color32::from_rgb(255, 180, 60)));
+                    }
                 });
-            }
+            });
 
-            ui.add_space(16.0);
+            ui.add_space(8.0);
+
+            // Row 2: status circle (centered)
             ui.vertical_centered(|ui| {
                 self.render_status_indicator(ui);
             });
-            ui.add_space(16.0);
 
-            // Tabs
-            ui.horizontal(|ui| {
-                let config_text = if self.tab == Tab::Config {
-                    RichText::new(format!("⚙ {}", self.lang.text(TextKey::ConfigTab))).color(ACCENT_BLUE)
-                } else {
-                    RichText::new(format!("⚙ {}", self.lang.text(TextKey::ConfigTab))).color(Color32::from_gray(160))
-                };
-                let monitor_text = if self.tab == Tab::Monitor {
-                    RichText::new(format!("📊 {}", self.lang.text(TextKey::MonitorTab))).color(ACCENT_BLUE)
-                } else {
-                    RichText::new(format!("📊 {}", self.lang.text(TextKey::MonitorTab))).color(Color32::from_gray(160))
-                };
+            ui.add_space(8.0);
 
-                if ui.selectable_label(self.tab == Tab::Config, config_text).clicked() {
-                    self.tab = Tab::Config;
-                }
-                if ui.selectable_label(self.tab == Tab::Monitor, monitor_text).clicked() {
-                    self.tab = Tab::Monitor;
-                }
-
-                if self.config_dirty && self.tab != Tab::Config {
-                    ui.add_space(4.0);
-                    ui.label(RichText::new("●").size(10.0).color(Color32::from_rgb(255, 180, 60)));
-                }
+            // Row 3: speed
+            let snapshot = self.proxy_mgr.stats().snapshot();
+            let speed_color = if self.connected_cache {
+                GREEN_ON
+            } else {
+                Color32::from_gray(120)
+            };
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    RichText::new(&self.stats_text)
+                        .size(20.0)
+                        .color(speed_color),
+                );
             });
 
-            ui.separator();
+            ui.add_space(4.0);
 
-            match self.tab {
-                Tab::Config => self.render_config_tab(ui),
-                Tab::Monitor => self.render_monitor_tab(ui),
-            }
+            // Row 4: traffic totals
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(self.lang.text(TextKey::TotalUpload))
+                        .size(12.0)
+                        .color(Color32::from_gray(180)),
+                );
+                ui.label(
+                    RichText::new(Self::format_bytes(snapshot.bytes_up))
+                        .size(12.0)
+                        .color(Color32::from_gray(220)),
+                );
+                ui.add_space(16.0);
+                ui.label(
+                    RichText::new(self.lang.text(TextKey::TotalDownload))
+                        .size(12.0)
+                        .color(Color32::from_gray(180)),
+                );
+                ui.label(
+                    RichText::new(Self::format_bytes(snapshot.bytes_down))
+                        .size(12.0)
+                        .color(Color32::from_gray(220)),
+                );
+            });
+
+            ui.add_space(2.0);
+
+            // Row 5: uptime
+            ui.label(
+                RichText::new(format!("{}{}", self.lang.text(TextKey::Uptime), snapshot.uptime_secs))
+                    .size(12.0)
+                    .color(Color32::from_gray(150)),
+            );
+
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(2.0);
+
+            // Row 6: event log header + log
+            ui.label(
+                RichText::new(self.lang.text(TextKey::EventLog))
+                    .size(12.0)
+                    .color(Color32::from_gray(180)),
+            );
+
+            let log_height = ui.available_height() - 6.0;
+            egui::ScrollArea::vertical()
+                .max_height(log_height)
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    for (line, color) in &self.log_lines {
+                        ui.label(
+                            RichText::new(line)
+                                .size(11.0)
+                                .color(*color),
+                        );
+                    }
+                });
         });
 
-        // --- Close dialog centered on main window ---
+        // --- Config overlay window ---
+        if self.show_config {
+            self.render_config_window(ctx);
+        }
+
+        // --- Close dialog ---
         if self.close_action == CloseAction::ShowDialog {
             let dialog_size = egui::vec2(300.0, 120.0);
 
@@ -507,7 +529,6 @@ impl eframe::App for GidyApp {
                 .with_inner_size(dialog_size)
                 .with_resizable(false);
 
-            // Center on main window
             if let Some(main_rect) = self.main_rect {
                 let dialog_center_x = main_rect.min.x + main_rect.width() / 2.0;
                 let dialog_center_y = main_rect.min.y + main_rect.height() / 2.0;
@@ -548,7 +569,7 @@ impl eframe::App for GidyApp {
             );
         }
 
-        // Keep repaint loop alive when hidden for tray events
+        // Keep repaint alive when hidden for tray events
         if !ctx.input(|i| i.viewport().focused.unwrap_or(true)) {
             ctx.request_repaint();
         }
