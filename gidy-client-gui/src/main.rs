@@ -19,8 +19,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let file_appender = tracing_appender::rolling::never(&log_dir, "gidy-client.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let log_path = log_dir.join("gidy-client.log");
+    let (non_blocking, _guard) = if let Ok(f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        tracing_appender::non_blocking(f)
+    } else {
+        tracing_appender::non_blocking(std::io::stderr())
+    };
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -47,7 +55,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([420.0, 560.0])
-            .with_resizable(false)
+            .with_min_inner_size([420.0, 360.0])
+            .with_resizable(true)
             .with_decorations(true)
             .with_transparent(true),
         ..Default::default()

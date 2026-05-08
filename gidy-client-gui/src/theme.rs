@@ -111,11 +111,7 @@ pub fn apply_theme(ctx: &egui::Context) {
 
 /// Green gradient colors for active state
 pub const GREEN_ON: Color32 = Color32::from_rgb(80, 220, 120);
-pub const GREEN_GLOW: Color32 = Color32::from_rgba_premultiplied(80, 220, 120, 40);
-
-/// Red colors for inactive state
 pub const RED_OFF: Color32 = Color32::from_rgb(220, 80, 80);
-pub const RED_GLOW: Color32 = Color32::from_rgba_premultiplied(220, 80, 80, 40);
 
 /// Accent color
 pub const ACCENT_BLUE: Color32 = Color32::from_rgb(100, 160, 240);
