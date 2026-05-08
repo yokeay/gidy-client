@@ -18,6 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Clone gidy-core
+        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
+
       - uses: dtolnay/rust-toolchain@stable
       - name: Test gidy-client-core
         run: cargo test -p gidy-client-core
@@ -42,6 +46,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Clone gidy-core
+        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
+
       - uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --release -p ${{ matrix.package }}
