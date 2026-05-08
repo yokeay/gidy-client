@@ -83,6 +83,13 @@ impl ProxyManager {
         state.error = None;
         state.running = true;
 
+        // Set Windows system proxy to route all traffic through SOCKS5
+        #[cfg(target_os = "windows")]
+        {
+            let proxy_addr = format!("socks=127.0.0.1:{}", listen_addr.port());
+            crate::win_proxy::set_proxy(&proxy_addr);
+        }
+
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         *self.shutdown_tx.lock().await = Some(shutdown_tx);
 
