@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone gidy-core
+        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package
+        run: |
+          cd target/release
+          tar czf ../../gidy-client-linux-x86_64.tar.gz gidy-client
+          sha256sum ../../gidy-client-linux-x86_64.tar.gz > ../../gidy-client-linux-x86_64.tar.gz.sha256
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            gidy-client-linux-x86_64.tar.gz
+            gidy-client-linux-x86_64.tar.gz.sha256
+          generate_release_notes: true
+
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone gidy-core
+        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
+        shell: bash
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package
+        run: |
+          cd target/release
+          tar czf ../../gidy-client-windows-x86_64.tar.gz gidy-client.exe gidy-client-gui.exe
+          sha256sum ../../gidy-client-windows-x86_64.tar.gz > ../../gidy-client-windows-x86_64.tar.gz.sha256
+        shell: bash
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            gidy-client-windows-x86_64.tar.gz
+            gidy-client-windows-x86_64.tar.gz.sha256
+          generate_release_notes: true
