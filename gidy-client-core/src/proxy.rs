@@ -58,17 +58,15 @@ async fn handle_socks5(
     stats: Arc<TrafficStats>,
 ) -> Result<(), String> {
     let mut buf = vec![0u8; 4096];
-    let mut buf_len = 0usize;
 
     // Read initial data (may contain greeting + request in one packet)
-    let n = stream
+    let mut buf_len = stream
         .read(&mut buf)
         .await
         .map_err(|e| format!("read greeting: {}", e))?;
-    buf_len = n;
 
-    if n < 3 || buf[0] != 0x05 {
-        return Err(format!("invalid socks5 greeting: {:?}", &buf[..n.min(8)]));
+    if buf_len < 3 || buf[0] != 0x05 {
+        return Err(format!("invalid socks5 greeting: {:?}", &buf[..buf_len.min(8)]));
     }
 
     let nmethods = buf[1] as usize;

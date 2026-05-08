@@ -15,6 +15,7 @@ pub struct GidyClient {
     config: Arc<ClientConfig>,
     psk: [u8; 32],
     obfs_key: [u8; 32],
+    #[allow(dead_code)]
     auth_key: [u8; 32],
     stats: Arc<TrafficStats>,
 }
@@ -515,7 +516,7 @@ async fn read_exact(recv: &mut RecvStream, buf: &mut [u8]) -> Result<(), String>
     while offset < buf.len() {
         match recv.read(&mut buf[offset..]).await {
             Ok(Some(n)) if n == 0 && offset == 0 => return Err("stream eof".into()),
-            Ok(Some(n)) if n == 0 => return Err("stream finished".into()),
+            Ok(Some(0)) => return Err("stream finished".into()),
             Ok(Some(n)) => offset += n,
             Ok(None) => return Err("stream finished".into()),
             Err(e) => return Err(format!("read error: {}", e)),

@@ -18,20 +18,14 @@ mod imp {
                 .chain(std::iter::once(0))
                 .collect();
 
-            let mut options = [INTERNET_PER_CONN_OPTIONW {
-                dwOption: INTERNET_PER_CONN_PROXY_SERVER,
-                Value: INTERNET_PER_CONN_OPTIONW_0 {
-                    pszValue: windows::core::PWSTR(proxy_w.as_ptr() as *mut _),
-                },
-            }];
+            let mut option: INTERNET_PER_CONN_OPTIONW = std::mem::zeroed();
+            option.dwOption = INTERNET_PER_CONN_PROXY_SERVER;
+            option.Value.pszValue = windows::core::PWSTR(proxy_w.as_ptr() as *mut _);
 
-            let mut list = INTERNET_PER_CONN_OPTION_LISTW {
-                dwSize: std::mem::size_of::<INTERNET_PER_CONN_OPTION_LISTW>() as u32,
-                pszConnection: windows::core::PWSTR::null(),
-                dwOptionCount: options.len() as u32,
-                dwOptionError: 0,
-                pOptions: options.as_mut_ptr(),
-            };
+            let mut list: INTERNET_PER_CONN_OPTION_LISTW = std::mem::zeroed();
+            list.dwSize = std::mem::size_of::<INTERNET_PER_CONN_OPTION_LISTW>() as u32;
+            list.dwOptionCount = 1;
+            list.pOptions = &mut option;
 
             let _ = InternetSetOptionW(
                 None,
@@ -40,7 +34,6 @@ mod imp {
                 std::mem::size_of::<INTERNET_PER_CONN_OPTION_LISTW>() as u32,
             );
 
-            // Refresh system proxy settings
             let _ = InternetSetOptionW(None, INTERNET_OPTION_PROXY_SETTINGS_CHANGED, None, 0);
             let _ = InternetSetOptionW(None, INTERNET_OPTION_REFRESH, None, 0);
         }
@@ -50,20 +43,14 @@ mod imp {
 
     pub fn clear_proxy() {
         unsafe {
-            let mut options = [INTERNET_PER_CONN_OPTIONW {
-                dwOption: INTERNET_PER_CONN_FLAGS,
-                Value: INTERNET_PER_CONN_OPTIONW_0 {
-                    dwValue: PROXY_TYPE_DIRECT.0,
-                },
-            }];
+            let mut option: INTERNET_PER_CONN_OPTIONW = std::mem::zeroed();
+            option.dwOption = INTERNET_PER_CONN_FLAGS;
+            option.Value.dwValue = PROXY_TYPE_DIRECT;
 
-            let mut list = INTERNET_PER_CONN_OPTION_LISTW {
-                dwSize: std::mem::size_of::<INTERNET_PER_CONN_OPTION_LISTW>() as u32,
-                pszConnection: windows::core::PWSTR::null(),
-                dwOptionCount: options.len() as u32,
-                dwOptionError: 0,
-                pOptions: options.as_mut_ptr(),
-            };
+            let mut list: INTERNET_PER_CONN_OPTION_LISTW = std::mem::zeroed();
+            list.dwSize = std::mem::size_of::<INTERNET_PER_CONN_OPTION_LISTW>() as u32;
+            list.dwOptionCount = 1;
+            list.pOptions = &mut option;
 
             let _ = InternetSetOptionW(
                 None,
