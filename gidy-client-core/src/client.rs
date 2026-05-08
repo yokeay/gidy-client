@@ -254,6 +254,17 @@ impl Connection {
             });
             self.codec.encode(&frame, &self.dpm, &mut rng)
         };
+
+        info!(
+            "open_tunnel: encoded={}B opcodes: frag={:02x} resp={:02x} req={:02x} data_resp={:02x} ping={:02x} rst={:02x} | enc: sid_be={} sn_be={} vsid={} vseq={} | lpmode={} | epoch={}",
+            encoded.len(),
+            self.dpm.opcodes.auth_frag, self.dpm.opcodes.auth_resp, self.dpm.opcodes.data_req, self.dpm.opcodes.data_resp, self.dpm.opcodes.ping, self.dpm.opcodes.rst,
+            self.dpm.encoding.stream_id_be, self.dpm.encoding.seq_num_be, self.dpm.encoding.use_varint_stream_id, self.dpm.encoding.use_varint_seq,
+            self.dpm.len_prefix_mode,
+            self.matched_epoch,
+        );
+        info!("open_tunnel: encoded hex[0..64]: {:02x?}", &encoded[..encoded.len().min(64)]);
+
         let obfuscated = obfuscate(&self.obfs_key, &encoded);
 
         send.write_all(&obfuscated)
@@ -330,7 +341,7 @@ impl Tunnel {
         let obfuscated = obfuscate(&self.obfs_key, &encoded);
 
         tracing::debug!("tunnel.send: opening bi-stream stream={} seq={} len={}", self.stream_id, seq, obfuscated.len());
-        let (mut send, recv) = self
+        let (mut send, mut recv) = self
             .quic
             .open_bi()
             .await
@@ -341,35 +352,65 @@ impl Tunnel {
             .await
             .map_err(|e| format!("tunnel send: {}", e))?;
         send.finish().unwrap();
-
-        tracing::debug!("tunnel.send: sent, waiting for response...");
         self.stats.add_up(obfuscated.len() as u64 + data.len() as u64);
 
-        let resp_data = read_stream_full(recv, 65536).await?;
-        tracing::debug!("tunnel.send: response {} bytes", resp_data.len());
-        let raw = if is_gidy_packet(&resp_data) {
-            deobfuscate(&self.obfs_key, &resp_data)
-                .map_err(|e| format!("tunnel deobfuscate: {}", e))?
-        } else {
-            resp_data.to_vec()
-        };
-
-        let frame = self.codec.decode(&raw, &self.dpm)
-            .map_err(|e| format!("tunnel decode: {}", e))?;
-
-        match frame {
-            Frame::DataResp { status, payload, .. } => {
-                if status != 0 {
-                    return Err(format!("data resp error: {}", status));
+        // Read streamed chunks: each chunk is [u32 LE len][obfuscated DataResp frame]
+        let mut all_data: Vec<u8> = Vec::new();
+        let mut chunk_count = 0u32;
+        loop {
+            let mut len_buf = [0u8; 4];
+            match read_exact(&mut recv, &mut len_buf).await {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::info!("tunnel.send: read_exact len_buf failed: {} (total so far: {} bytes in {} chunks)", e, all_data.len(), chunk_count);
+                    break;
                 }
-                self.stats.add_down(raw.len() as u64 + payload.len() as u64);
-                Ok(payload)
             }
-            Frame::Rst { reason, .. } => {
-                Err(format!("stream reset: reason={}", reason))
+            let chunk_len = u32::from_le_bytes(len_buf) as usize;
+            if chunk_len == 0 || chunk_len > 64 * 1024 * 1024 {
+                tracing::info!("tunnel.send: bad chunk_len={}, breaking (total so far: {} bytes in {} chunks)", chunk_len, all_data.len(), chunk_count);
+                break;
             }
-            _ => Ok(bytes::Bytes::new()),
+
+            let mut chunk = vec![0u8; chunk_len];
+            read_exact(&mut recv, &mut chunk).await
+                .map_err(|e| format!("tunnel read chunk: {}", e))?;
+
+            let raw = if is_gidy_packet(&chunk) {
+                deobfuscate(&self.obfs_key, &chunk)
+                    .map_err(|e| format!("tunnel deobfuscate: {}", e))?
+            } else {
+                chunk
+            };
+
+            let frame = self.codec.decode(&raw, &self.dpm)
+                .map_err(|e| format!("tunnel decode chunk: {}", e))?;
+
+            match frame {
+                Frame::DataResp { status, payload, stream_id: sid, seq_num: sn } => {
+                    if status != 0 {
+                        return Err(format!("data resp error: {}", status));
+                    }
+                    if payload.is_empty() {
+                        tracing::info!("tunnel.send: end-of-stream marker (sid={} sn={}), total {} bytes in {} chunks", sid, sn, all_data.len(), chunk_count);
+                        break;
+                    }
+                    tracing::info!("tunnel.send: chunk #{} wire_len={} payload_len={} sid={} sn={} running_total={}", chunk_count, chunk_len, payload.len(), sid, sn, all_data.len() + payload.len());
+                    all_data.extend_from_slice(&payload);
+                    chunk_count += 1;
+                }
+                Frame::Rst { reason, .. } => {
+                    return Err(format!("stream reset: reason={}", reason));
+                }
+                _ => {
+                    tracing::info!("tunnel.send: unexpected frame type, ignoring");
+                }
+            }
         }
+
+        tracing::info!("tunnel.send: DONE received {} bytes total in {} chunks", all_data.len(), chunk_count);
+        self.stats.add_down(all_data.len() as u64);
+        Ok(bytes::Bytes::from(all_data))
     }
 
     pub async fn close(&self) -> Result<(), String> {
@@ -466,4 +507,19 @@ async fn read_stream_full(mut recv: RecvStream, max_bytes: usize) -> Result<byte
         }
     }
     Ok(bytes::Bytes::from(buf))
+}
+
+/// Read exactly `buf.len()` bytes from the stream, handling partial reads.
+async fn read_exact(recv: &mut RecvStream, buf: &mut [u8]) -> Result<(), String> {
+    let mut offset = 0;
+    while offset < buf.len() {
+        match recv.read(&mut buf[offset..]).await {
+            Ok(Some(n)) if n == 0 && offset == 0 => return Err("stream eof".into()),
+            Ok(Some(n)) if n == 0 => return Err("stream finished".into()),
+            Ok(Some(n)) => offset += n,
+            Ok(None) => return Err("stream finished".into()),
+            Err(e) => return Err(format!("read error: {}", e)),
+        }
+    }
+    Ok(())
 }

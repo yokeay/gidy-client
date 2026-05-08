@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 gidy-client-core = { path = "../gidy-client-core" }
-gidy-core = { git = "https://github.com/yokeay/gidy-core.git" }
+gidy-core = { path = "../../gidy-core" }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
