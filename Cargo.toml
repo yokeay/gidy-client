@@ -1,5 +1,5 @@
 [workspace]
-members = ["gidy-client-core", "gidy-client-cli", "gidy-client-gui"]
+members = ["gidy-client-core", "gidy-client-cli", "gidy-client-gui/src-tauri"]
 resolver = "2"
 
 [workspace.package]
