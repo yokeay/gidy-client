@@ -8,11 +8,17 @@ pub struct AppState {
     pub proxy: Arc<Mutex<ProxyState>>,
 }
 
-impl AppState {
-    pub fn new() -> Self {
+impl Default for AppState {
+    fn default() -> Self {
         Self {
             proxy: Arc::new(Mutex::new(ProxyState::default())),
         }
+    }
+}
+
+impl AppState {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
