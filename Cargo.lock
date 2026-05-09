@@ -1262,7 +1262,7 @@ dependencies = [
 
 [[package]]
 name = "gidy-client-cli"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "clap",
  "gidy-client-core",
@@ -1278,7 +1278,7 @@ dependencies = [
 
 [[package]]
 name = "gidy-client-core"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "blake3",
  "bytes",
@@ -1300,7 +1300,7 @@ dependencies = [
 
 [[package]]
 name = "gidy-client-gui"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "gidy-client-core",
  "gidy-core",

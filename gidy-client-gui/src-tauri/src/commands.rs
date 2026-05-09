@@ -28,7 +28,7 @@ mod proxy_state {
                 error: None,
                 config: super::ClientConfig {
                     psk_hex: String::new(),
-                    server_addr: "49.12.243.33:4433".into(),
+                    server_addr: "49.12.243.33:4434".into(),
                     server_name: "localhost".into(),
                     listen_addr: "127.0.0.1:1080".parse().unwrap(),
                     log_level: "info".into(),
@@ -67,7 +67,7 @@ impl Default for GuiConfig {
         Self {
             psk_hex: String::new(),
             server_addr: "49.12.243.33".into(),
-            server_port: 4433,
+            server_port: 4434,
             server_name: "localhost".into(),
             socks5_addr: "127.0.0.1".into(),
             socks5_port: 1080,
@@ -201,7 +201,7 @@ pub async fn get_config(state: tauri::State<'_, AppState>) -> Result<GuiConfig, 
     Ok(GuiConfig {
         psk_hex: cfg.psk_hex.clone(),
         server_addr: cfg.server_addr.split(':').next().unwrap_or("").to_string(),
-        server_port: cfg.server_addr.split(':').nth(1).and_then(|p| p.parse().ok()).unwrap_or(4433),
+        server_port: cfg.server_addr.split(':').nth(1).and_then(|p| p.parse().ok()).unwrap_or(4434),
         server_name: cfg.server_name.clone(),
         socks5_addr: cfg.listen_addr.to_string().split(':').next().unwrap_or("127.0.0.1").to_string(),
         socks5_port: cfg.listen_addr.port(),

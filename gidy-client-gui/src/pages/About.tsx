@@ -9,7 +9,7 @@ export default function About() {
           <img src="/logo.png" alt="gidy" className="w-16 h-16 rounded-xl" />
           <div>
             <h2 className="text-xl font-bold">gidy client</h2>
-            <p className="text-sm text-muted-foreground">v0.2.3</p>
+            <p className="text-sm text-muted-foreground">v0.2.5</p>
           </div>
         </div>
 

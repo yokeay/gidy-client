@@ -1,3 +1,25 @@
+## v0.2.5 - 2026-05-09
+
+### 变更内容
+- 修复默认服务器端口配置（4433 → 4434）与服务器实际端口对齐
+- 修复 gidy-core generate_psk() panic（nanos 位移后类型不匹配）
+- 流量监测页面新增圆形速度表盘组件（Speedometer），匹配 UI 稿件
+- 用户设置页面新增独立语言切换器
+- Dashboard 新增连接错误提示
+- 更新版本号引用至 v0.2.5
+- 前端 build / Rust build / Tauri build 均通过
+
+### 影响范围
+- gidy-core src/lib.rs（PSK 生成修复）
+- gidy-client-gui/src-tauri/src/commands.rs（默认端口）
+- gidy-client-gui/src/pages/（Dashboard, TrafficMonitor, UserSettings, About）
+- gidy-client-gui/src/components/Speedometer.tsx（新增）
+
+### 功能列表
+- 速度表盘实时显示代理速率
+- 连接错误前端提示
+- 默认端口匹配服务器实际配置
+
 ## v0.2.3 - 2026-05-08
 
 ### 变更内容

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Play, Square, ArrowUp, ArrowDown, Activity, Clock, Server } from "lucide-react";
-import SpeedChart from "../components/SpeedChart";
+import { Play, Square, ArrowUp, ArrowDown, Activity, Server } from "lucide-react";
 import {
   getStats,
   getStatus,
@@ -13,12 +12,6 @@ import {
   StatsSnapshot,
 } from "../api";
 
-interface ChartPoint {
-  time: number;
-  up: number;
-  down: number;
-}
-
 export default function Dashboard() {
   const { t } = useTranslation();
   const [status, setStatus] = useState({ running: false, connected: false, error: null as string | null });
@@ -26,8 +19,8 @@ export default function Dashboard() {
     bytes_up: 0, bytes_down: 0, speed_up_kbps: 0,
     speed_down_kbps: 0, uptime_secs: 0, active_connections: 0,
   });
-  const [chartData, setChartData] = useState<ChartPoint[]>([]);
   const [loading, setLoading] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const refreshStats = useCallback(async () => {
@@ -35,14 +28,7 @@ export default function Dashboard() {
       const [s, st] = await Promise.all([getStats(), getStatus()]);
       setStats(s);
       setStatus(st);
-      setChartData(prev => {
-        const next = [...prev, { time: Date.now(), up: s.speed_up_kbps, down: s.speed_down_kbps }];
-        if (next.length > 60) return next.slice(-60);
-        return next;
-      });
-    } catch {
-      // API not available in browser dev mode
-    }
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -53,6 +39,7 @@ export default function Dashboard() {
 
   const handleToggle = async () => {
     setLoading(true);
+    setConnectError(null);
     try {
       if (status.running) {
         const result = await disconnect();
@@ -62,7 +49,7 @@ export default function Dashboard() {
         setStatus(result);
       }
     } catch (e) {
-      console.error("toggle proxy error:", e);
+      setConnectError(String(e));
     }
     setLoading(false);
   };
@@ -78,7 +65,7 @@ export default function Dashboard() {
           <div>
             <p className="text-emerald-100 text-sm mb-1">gidy client</p>
             <h2 className="text-2xl font-bold">
-              {t("dashboard.version")} v0.2.3
+              {t("dashboard.version")} v0.2.5
             </h2>
             <p className="text-emerald-100 mt-2 text-sm">
               {status.connected
@@ -105,6 +92,12 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {connectError && (
+        <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-4 text-sm text-destructive">
+          {connectError}
+        </div>
+      )}
 
       {/* Speed cards */}
       <div className="grid grid-cols-2 gap-4">
@@ -134,35 +127,28 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Speed chart */}
-      <SpeedChart data={chartData} />
-
       {/* Bottom metric cards */}
       <div className="grid grid-cols-3 gap-4">
         <div className="bg-card rounded-xl border border-border p-4">
           <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
             <Activity size={14} />
+            {t("dashboard.proxyConnections")}
+          </div>
+          <p className="text-lg font-semibold">{stats.active_connections}</p>
+        </div>
+        <div className="bg-card rounded-xl border border-border p-4">
+          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
+            <Server size={14} />
             {t("dashboard.dnsElapsed")}
           </div>
           <p className="text-lg font-semibold">12ms</p>
         </div>
         <div className="bg-card rounded-xl border border-border p-4">
           <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
-            <Clock size={14} />
+            <Activity size={14} />
             {t("dashboard.serviceUptime")}
           </div>
-          <p className="text-lg font-semibold">
-            {formatUptime(stats.uptime_secs)}
-          </p>
-        </div>
-        <div className="bg-card rounded-xl border border-border p-4">
-          <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
-            <Server size={14} />
-            {t("dashboard.proxyConnections")}
-          </div>
-          <p className="text-lg font-semibold">
-            {stats.active_connections}
-          </p>
+          <p className="text-lg font-semibold">{formatUptime(stats.uptime_secs)}</p>
         </div>
       </div>
     </div>

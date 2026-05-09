@@ -19,7 +19,7 @@ const COLOR_OPTIONS = [
 ];
 
 export default function UserSettings({ theme, themeColor, onThemeChange, onThemeColorChange }: UserSettingsProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [config, setConfig] = useState<GuiConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -41,11 +41,7 @@ export default function UserSettings({ theme, themeColor, onThemeChange, onTheme
     if (!config) return;
     setSaving(true);
     try {
-      const updated = {
-        ...config,
-        theme: theme,
-        theme_color: themeColor,
-      };
+      const updated = { ...config, theme, theme_color: themeColor };
       await updateConfig(updated);
       setConfig(updated);
       setMessage(t("userSettings.saved"));
@@ -66,7 +62,7 @@ export default function UserSettings({ theme, themeColor, onThemeChange, onTheme
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-6">
-        {/* Basic Settings */}
+        {/* General Settings */}
         <div className="bg-card rounded-xl border border-border p-5">
           <h3 className="text-sm font-semibold mb-4">{t("userSettings.basicSettings")}</h3>
           <div className="space-y-5">
@@ -100,6 +96,13 @@ export default function UserSettings({ theme, themeColor, onThemeChange, onTheme
                 <span className="text-xs text-muted-foreground">{t("userSettings.days")}</span>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Appearance */}
+        <div className="bg-card rounded-xl border border-border p-5">
+          <h3 className="text-sm font-semibold mb-4">Appearance</h3>
+          <div className="space-y-5">
             <div className="flex items-center justify-between">
               <span className="text-sm">{t("userSettings.themeMode")}</span>
               <div className="flex gap-1 bg-muted rounded-lg p-0.5">
@@ -137,29 +140,50 @@ export default function UserSettings({ theme, themeColor, onThemeChange, onTheme
                 ))}
               </div>
             </div>
-          </div>
-        </div>
-
-        {/* Update Check */}
-        <div className="bg-card rounded-xl border border-border p-5">
-          <h3 className="text-sm font-semibold mb-4">{t("userSettings.updateCheck")}</h3>
-          <div className="space-y-4">
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">{t("userSettings.currentVersion")}</span>
-              <span className="font-medium">v0.2.3</span>
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Language</span>
+              <div className="flex gap-1 bg-muted rounded-lg p-0.5">
+                <button
+                  onClick={() => i18n.changeLanguage("zh")}
+                  className={`px-3 py-1 rounded-md text-xs transition-colors ${
+                    i18n.language === "zh" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}
+                >
+                  中文
+                </button>
+                <button
+                  onClick={() => i18n.changeLanguage("en")}
+                  className={`px-3 py-1 rounded-md text-xs transition-colors ${
+                    i18n.language === "en" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                  }`}
+                >
+                  English
+                </button>
+              </div>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">{t("userSettings.latestVersion")}</span>
-              <span className="font-medium">v0.2.3</span>
-            </div>
-            <button className="w-full py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
-              {t("userSettings.checkUpdate")}
-            </button>
           </div>
         </div>
       </div>
 
-      {/* Save button */}
+      {/* About / Version */}
+      <div className="bg-card rounded-xl border border-border p-5">
+        <h3 className="text-sm font-semibold mb-4">{t("userSettings.updateCheck")}</h3>
+        <div className="space-y-3">
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">{t("userSettings.currentVersion")}</span>
+            <span className="font-mono font-medium">v0.2.5</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">{t("userSettings.latestVersion")}</span>
+            <span className="font-mono font-medium">v0.2.5</span>
+          </div>
+          <button className="w-full py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+            {t("userSettings.checkUpdate")}
+          </button>
+        </div>
+      </div>
+
+      {/* Save */}
       <div className="flex items-center gap-4">
         <button
           onClick={handleSave}
@@ -168,9 +192,7 @@ export default function UserSettings({ theme, themeColor, onThemeChange, onTheme
         >
           {saving ? t("common.loading") : t("userSettings.saveConfig")}
         </button>
-        {message && (
-          <span className="text-xs text-emerald-500">{message}</span>
-        )}
+        {message && <span className="text-xs text-emerald-500">{message}</span>}
       </div>
     </div>
   );
