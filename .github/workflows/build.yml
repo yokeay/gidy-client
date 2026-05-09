@@ -43,13 +43,10 @@ jobs:
             artifact: gidy-client-gui.exe
             name: gidy-client-gui-windows-x86_64
             package: gidy-client-gui
-            frontend: true
           - os: ubuntu-latest
             artifact: gidy-client-gui
             name: gidy-client-gui-linux-x86_64
             package: gidy-client-gui
-            frontend: true
-            system_deps: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -57,44 +54,12 @@ jobs:
       - name: Clone gidy-core
         run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
 
-      - name: Install system deps (Linux Tauri)
-        if: matrix.system_deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev libglib2.0-dev libappindicator3-dev librsvg2-dev
-
       - uses: dtolnay/rust-toolchain@stable
-
-      - uses: actions/setup-node@v4
-        if: matrix.frontend
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: gidy-client-gui/package-lock.json
-
-      - name: npm ci
-        if: matrix.frontend
-        run: npm ci
-        working-directory: gidy-client-gui
-
-      - name: Build frontend
-        if: matrix.frontend
-        run: npm run build
-        working-directory: gidy-client-gui
 
       - name: Build
         run: cargo build --release -p ${{ matrix.package }}
 
-      - name: Upload artifact (CLI)
-        if: '!matrix.frontend'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}
-          path: target/release/${{ matrix.artifact }}
-
-      - name: Upload artifact (GUI)
-        if: matrix.frontend
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
