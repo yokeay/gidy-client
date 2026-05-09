@@ -65,8 +65,9 @@ jobs:
         run: npm run build
         working-directory: gidy-client-gui
 
-      - name: Cargo build GUI
-        run: cargo build --release -p gidy-client-gui
+      - name: Build GUI (Tauri)
+        run: npx tauri build --no-bundle
+        working-directory: gidy-client-gui
 
       - name: Cargo clippy GUI
-        run: cargo clippy -p gidy-client-gui -- -D warnings
+        run: cargo clippy --manifest-path gidy-client-gui/src-tauri/Cargo.toml -- -D warnings

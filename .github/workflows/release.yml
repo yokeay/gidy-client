@@ -40,8 +40,12 @@ jobs:
         run: npm run build
         working-directory: gidy-client-gui
 
-      - name: Build release
-        run: cargo build --release
+      - name: Build GUI (Tauri)
+        run: npx tauri build --no-bundle
+        working-directory: gidy-client-gui
+
+      - name: Build CLI
+        run: cargo build --release -p gidy-client-cli
 
       - name: Package
         run: |
@@ -86,8 +90,13 @@ jobs:
         run: npm run build
         working-directory: gidy-client-gui
 
-      - name: Build release
-        run: cargo build --release
+      - name: Build GUI (Tauri)
+        run: npx tauri build --no-bundle
+        working-directory: gidy-client-gui
+        shell: bash
+
+      - name: Build CLI
+        run: cargo build --release -p gidy-client-cli
 
       - name: Package
         run: |

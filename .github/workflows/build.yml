@@ -84,8 +84,14 @@ jobs:
         run: npm run build
         working-directory: gidy-client-gui
 
-      - name: Build
+      - name: Build (CLI)
+        if: '!matrix.frontend'
         run: cargo build --release -p ${{ matrix.package }}
+
+      - name: Build (GUI - Tauri)
+        if: matrix.frontend
+        run: npx tauri build --no-bundle
+        working-directory: gidy-client-gui
 
       - name: Upload artifact (CLI)
         if: '!matrix.frontend'
