@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { formatSpeed } from "../api";
 
@@ -6,16 +7,27 @@ interface SpeedometerProps {
   maxKbps?: number;
 }
 
-export default function Speedometer({ speedKbps, maxKbps = 1000 }: SpeedometerProps) {
+export default function Speedometer({
+  speedKbps,
+  maxKbps = 1000,
+}: SpeedometerProps) {
   const { t } = useTranslation();
 
-  const angle = Math.min((speedKbps / maxKbps) * 270, 270);
+  const ratio = Math.max(0, Math.min(speedKbps / maxKbps, 1));
+  const angle = ratio * 270;
   const startAngle = -225;
   const endAngle = startAngle + angle;
 
-  const cx = 160, cy = 140, r = 120;
+  const cx = 160;
+  const cy = 150;
+  const r = 110;
 
-  const polarToCartesian = (cx: number, cy: number, r: number, angleDeg: number) => {
+  const polarToCartesian = (
+    cx: number,
+    cy: number,
+    r: number,
+    angleDeg: number,
+  ) => {
     const rad = (angleDeg * Math.PI) / 180;
     return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
   };
@@ -27,35 +39,41 @@ export default function Speedometer({ speedKbps, maxKbps = 1000 }: SpeedometerPr
     return `M ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y}`;
   };
 
-  // Ticks every 30 degrees
-  const ticks = [];
-  for (let deg = -225; deg <= 45; deg += 45) {
-    const inner = polarToCartesian(cx, cy, r - 14, deg);
+  // Major ticks every 45° (7 ticks across 270°) + minor ticks
+  const majorTicks: ReactNode[] = [];
+  const minorTicks: ReactNode[] = [];
+  for (let deg = -225; deg <= 45; deg += 15) {
+    const isMajor = (deg + 225) % 45 === 0;
+    const inner = polarToCartesian(cx, cy, r - (isMajor ? 14 : 8), deg);
     const outer = polarToCartesian(cx, cy, r - 2, deg);
-    ticks.push(
+    const arr = isMajor ? majorTicks : minorTicks;
+    arr.push(
       <line
         key={deg}
-        x1={inner.x} y1={inner.y} x2={outer.x} y2={outer.y}
-        stroke="currentColor" strokeWidth={2} className="text-muted-foreground/50"
-      />
+        x1={inner.x}
+        y1={inner.y}
+        x2={outer.x}
+        y2={outer.y}
+        stroke="currentColor"
+        strokeWidth={isMajor ? 1.5 : 1}
+        className={
+          isMajor ? "text-muted-foreground" : "text-muted-foreground/40"
+        }
+        strokeLinecap="round"
+      />,
     );
   }
 
-  // Needle
-  const needleEnd = polarToCartesian(cx, cy, r - 30, endAngle);
-  const needleBase1 = polarToCartesian(cx, cy, 6, endAngle + 90);
-  const needleBase2 = polarToCartesian(cx, cy, 6, endAngle - 90);
-
   return (
-    <div className="flex flex-col items-center">
-      <svg viewBox="0 0 320 300" className="w-full max-w-xs h-auto">
+    <div className="flex flex-col items-center w-full">
+      <svg viewBox="0 0 320 280" className="w-full max-w-sm h-auto">
         {/* Background arc */}
         <path
           d={describeArc(-225, 45)}
           fill="none"
           stroke="currentColor"
-          strokeWidth="10"
-          className="text-muted-foreground/20"
+          strokeWidth="8"
+          className="text-muted"
           strokeLinecap="round"
         />
         {/* Active arc */}
@@ -63,26 +81,35 @@ export default function Speedometer({ speedKbps, maxKbps = 1000 }: SpeedometerPr
           <path
             d={describeArc(-225, endAngle)}
             fill="none"
-            stroke="var(--chart-up)"
-            strokeWidth="10"
+            stroke="currentColor"
+            strokeWidth="8"
             strokeLinecap="round"
+            className="text-foreground"
           />
         )}
         {/* Ticks */}
-        {ticks}
-        {/* Needle */}
-        <polygon
-          points={`${needleEnd.x},${needleEnd.y} ${needleBase1.x},${needleBase1.y} ${needleBase2.x},${needleBase2.y}`}
-          fill="currentColor"
-          className="text-foreground"
-        />
-        <circle cx={cx} cy={cy} r="8" fill="currentColor" className="text-foreground" />
-        {/* Center speed text */}
-        <text x={cx} y={cy + 40} textAnchor="middle" className="fill-foreground text-3xl font-bold" fontSize="28">
+        {minorTicks}
+        {majorTicks}
+        {/* Center text */}
+        <text
+          x={cx}
+          y={cy + 8}
+          textAnchor="middle"
+          className="fill-foreground tabular"
+          fontSize="32"
+          fontWeight="700"
+        >
           {formatSpeed(speedKbps)}
         </text>
-        <text x={cx} y={cy + 62} textAnchor="middle" className="fill-muted-foreground text-xs" fontSize="12">
-          {t("trafficMonitor.realtime")}
+        <text
+          x={cx}
+          y={cy + 32}
+          textAnchor="middle"
+          className="fill-muted-foreground"
+          fontSize="11"
+          letterSpacing="0.08em"
+        >
+          {t("trafficMonitor.realtime").toUpperCase()}
         </text>
       </svg>
     </div>
