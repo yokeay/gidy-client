@@ -52,12 +52,38 @@ jobs:
       - name: Lint
         id: lint
         continue-on-error: true
-        run: ./gradlew :app:lintDebug --stacktrace
+        run: ./gradlew :app:lintDebug --stacktrace --info
 
       - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+        id: assemble
+        continue-on-error: true
+        run: ./gradlew :app:assembleDebug --stacktrace --info 2>&1 | tee gidy-android/build-log.txt
+
+      - name: Tail build log on failure
+        if: steps.assemble.outcome == 'failure'
+        run: |
+          echo "=========== LAST 400 LINES OF BUILD LOG ==========="
+          tail -n 400 gidy-android/build-log.txt || true
+          echo "=========== GRADLE PROBLEMS REPORT ==========="
+          find gidy-android -path '*/build/reports/problems*' -type f | while read f; do
+            echo "--- $f ---"; cat "$f"
+          done
+          echo "=========== COMPILE ERRORS ==========="
+          grep -nE "e: |error:|FAILED|What went wrong|Caused by" gidy-android/build-log.txt | head -100 || true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gidy-android-build-log
+          path: |
+            gidy-android/build-log.txt
+            gidy-android/app/build/reports/**
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload debug APK
+        if: steps.assemble.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: gidy-android-debug
@@ -73,3 +99,7 @@ jobs:
           path: gidy-android/app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Fail job if assemble failed
+        if: steps.assemble.outcome == 'failure'
+        run: exit 1
