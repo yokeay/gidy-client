@@ -43,12 +43,12 @@ export default function App() {
         currentLang={i18n.language as "zh" | "en"}
       />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-12 shrink-0 flex items-center px-6 border-b border-border bg-card">
-          <h1 className="text-sm font-medium text-muted-foreground">
+        <header className="h-14 shrink-0 flex items-center px-8 border-b border-border bg-card">
+          <h1 className="text-sm font-medium">
             {pageTitle()}
           </h1>
         </header>
-        <main className="flex-1 overflow-auto p-6">
+        <main className="flex-1 overflow-auto px-8 py-6 scroll-thin">
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/dashboard" element={<Dashboard />} />
