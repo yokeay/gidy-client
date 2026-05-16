@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">gidy</string>
+    <string name="app_tagline">安全代理隧道</string>
+
+    <string name="nav_dashboard">仪表盘</string>
+    <string name="nav_traffic">流量</string>
+    <string name="nav_config">配置</string>
+    <string name="nav_settings">设置</string>
+    <string name="nav_about">关于</string>
+
+    <string name="dash_status_connected">已连接</string>
+    <string name="dash_status_disconnected">未连接</string>
+    <string name="dash_connect">连接</string>
+    <string name="dash_disconnect">断开</string>
+    <string name="dash_upload">上传</string>
+    <string name="dash_download">下载</string>
+    <string name="dash_total_up">累计上传</string>
+    <string name="dash_total_down">累计下载</string>
+    <string name="dash_active_conn">活动连接</string>
+    <string name="dash_uptime">运行时长</string>
+    <string name="dash_dns">DNS 延迟</string>
+
+    <string name="traffic_realtime">实时</string>
+    <string name="traffic_log">连接日志</string>
+    <string name="traffic_no_data">暂无数据</string>
+    <string name="traffic_target">目标</string>
+    <string name="traffic_type">类型</string>
+    <string name="traffic_size">大小</string>
+    <string name="traffic_time">时间</string>
+
+    <string name="cfg_proxy_server">代理服务器</string>
+    <string name="cfg_local_proxy">本地代理</string>
+    <string name="cfg_addr">地址</string>
+    <string name="cfg_port">端口</string>
+    <string name="cfg_psk">预共享密钥</string>
+    <string name="cfg_psk_hint">64 位十六进制密钥</string>
+    <string name="cfg_generate_psk">生成</string>
+    <string name="cfg_protocol">协议</string>
+    <string name="cfg_socks5">SOCKS5</string>
+    <string name="cfg_http">HTTP</string>
+    <string name="cfg_mode">路由模式</string>
+    <string name="cfg_mode_global">全局</string>
+    <string name="cfg_mode_pac">PAC</string>
+    <string name="cfg_save">保存并连接</string>
+    <string name="cfg_saved">已保存</string>
+    <string name="cfg_note_title">说明</string>
+    <string name="cfg_note_body">所有设置保存在本地，修改后需重启代理生效。</string>
+
+    <string name="set_basic">基础</string>
+    <string name="set_appearance">外观</string>
+    <string name="set_auto_start">开机自启</string>
+    <string name="set_auto_connect">启动后自动连接</string>
+    <string name="set_keep_alive">连接时保持屏幕常亮</string>
+    <string name="set_log_retention">日志保留</string>
+    <string name="set_days">天</string>
+    <string name="set_theme">主题</string>
+    <string name="set_theme_light">浅色</string>
+    <string name="set_theme_dark">深色</string>
+    <string name="set_theme_system">跟随系统</string>
+    <string name="set_language">语言</string>
+    <string name="set_save">保存</string>
+    <string name="set_update_check">更新</string>
+    <string name="set_current_version">当前版本</string>
+    <string name="set_check_update">检查更新</string>
+
+    <string name="about_repo">仓库</string>
+    <string name="about_license">许可</string>
+    <string name="about_license_text">专有软件，保留所有权利。</string>
+    <string name="about_blurb">gidy 协议 — 基于 QUIC 的协议变形安全代理。</string>
+    <string name="about_built">使用 Kotlin + Jetpack Compose 构建</string>
+
+    <string name="common_connected">已连接</string>
+    <string name="common_disconnected">未连接</string>
+</resources>

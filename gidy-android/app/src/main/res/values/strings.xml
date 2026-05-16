@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">gidy</string>
+    <string name="app_tagline">secure proxy tunnel</string>
+
+    <!-- Bottom Nav -->
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_traffic">Traffic</string>
+    <string name="nav_config">Config</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_about">About</string>
+
+    <!-- Dashboard -->
+    <string name="dash_status_connected">Connected</string>
+    <string name="dash_status_disconnected">Disconnected</string>
+    <string name="dash_connect">Connect</string>
+    <string name="dash_disconnect">Disconnect</string>
+    <string name="dash_upload">Upload</string>
+    <string name="dash_download">Download</string>
+    <string name="dash_total_up">Total upload</string>
+    <string name="dash_total_down">Total download</string>
+    <string name="dash_active_conn">Connections</string>
+    <string name="dash_uptime">Uptime</string>
+    <string name="dash_dns">DNS latency</string>
+
+    <!-- Traffic -->
+    <string name="traffic_realtime">Realtime</string>
+    <string name="traffic_log">Connection log</string>
+    <string name="traffic_no_data">No data yet</string>
+    <string name="traffic_target">Target</string>
+    <string name="traffic_type">Type</string>
+    <string name="traffic_size">Size</string>
+    <string name="traffic_time">Time</string>
+
+    <!-- Config -->
+    <string name="cfg_proxy_server">Proxy server</string>
+    <string name="cfg_local_proxy">Local proxy</string>
+    <string name="cfg_addr">Address</string>
+    <string name="cfg_port">Port</string>
+    <string name="cfg_psk">PSK</string>
+    <string name="cfg_psk_hint">64-char hex preshared key</string>
+    <string name="cfg_generate_psk">Generate</string>
+    <string name="cfg_protocol">Protocol</string>
+    <string name="cfg_socks5">SOCKS5</string>
+    <string name="cfg_http">HTTP</string>
+    <string name="cfg_mode">Routing mode</string>
+    <string name="cfg_mode_global">Global</string>
+    <string name="cfg_mode_pac">PAC</string>
+    <string name="cfg_save">Save and connect</string>
+    <string name="cfg_saved">Saved</string>
+    <string name="cfg_note_title">Note</string>
+    <string name="cfg_note_body">All settings are stored locally. Restart the proxy after changes.</string>
+
+    <!-- Settings -->
+    <string name="set_basic">Basic</string>
+    <string name="set_appearance">Appearance</string>
+    <string name="set_auto_start">Launch at boot</string>
+    <string name="set_auto_connect">Auto-connect on launch</string>
+    <string name="set_keep_alive">Keep screen awake while connected</string>
+    <string name="set_log_retention">Log retention</string>
+    <string name="set_days">days</string>
+    <string name="set_theme">Theme</string>
+    <string name="set_theme_light">Light</string>
+    <string name="set_theme_dark">Dark</string>
+    <string name="set_theme_system">System</string>
+    <string name="set_language">Language</string>
+    <string name="set_save">Save</string>
+    <string name="set_update_check">Update</string>
+    <string name="set_current_version">Current</string>
+    <string name="set_check_update">Check for updates</string>
+
+    <!-- About -->
+    <string name="about_repo">Repository</string>
+    <string name="about_license">License</string>
+    <string name="about_license_text">Proprietary. All rights reserved.</string>
+    <string name="about_blurb">gidy protocol — QUIC-based secure proxy with protocol morphing.</string>
+    <string name="about_built">Built with Kotlin + Jetpack Compose</string>
+
+    <string name="common_connected">Connected</string>
+    <string name="common_disconnected">Disconnected</string>
+</resources>

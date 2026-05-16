@@ -1,6 +1,6 @@
 import { Info, Shield, Code, ExternalLink } from "lucide-react";
 
-const APP_VERSION = "v0.2.6";
+const APP_VERSION = "v0.2.7";
 
 export default function About() {
   return (

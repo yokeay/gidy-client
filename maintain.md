@@ -1,3 +1,35 @@
+## v0.2.7 - 2026-05-16 · Android Stage 1（入库 + CI）
+
+### 变更内容
+- gidy-android/ Compose UI shell 入库（Kotlin 2.0 + Material3，UI 与 GUI 黑白灰主题一致）
+  - 5 个屏幕：Dashboard / SystemConfig / TrafficMonitor / UserSettings / About
+  - 8 个组件：Speedometer / SpeedChart / KpiCard / AppleCard / AppleSwitch / SegmentedToggle / SectionHeader / StatusBadge
+  - DataStore Preferences 骨架（ConfigDataStore + Config + MockStats）
+  - Navigation Compose 底部导航 + 中/英 i18n（values/strings.xml + values-zh/strings.xml）
+  - Apple-like 主题（Theme.kt / Color.kt / Shape.kt / Type.kt），含 light/dark
+- 新增 gidy-android/.gitignore（覆盖 .gradle/build/keystore/.aab/.apk/local.properties 等，强化签名密钥屏蔽）
+- 新增 .github/workflows/android.yml（push 触发：lintDebug + assembleDebug + 上传 APK & lint 报告 artifacts，仅在 gidy-android/** 变更时触发）
+- 本地不执行 build；CI 在 ubuntu-latest 上跑 JDK 17 + Android SDK，按需自动生成 Gradle wrapper
+- 更新 plan.md：新增 Android 客户端四阶段任务，Stage 1 标记完成
+
+### 影响范围
+- gidy-android/（新建，全量）
+- .github/workflows/android.yml（新建）
+- plan.md
+- maintain.md
+
+### 功能列表
+- Android UI shell 完整入库可被 IDE 直接打开
+- CI 自动产出 unsigned debug APK 作为 artifacts（保留 14 天）
+- Android 与 Rust/Tauri CI 工作流解耦，互不触发
+
+### 待办（Stage 2 起）
+- VpnService 前台服务 + tun 接管
+- DataStore 真实读写替换 Mock
+- 连接开关、流量统计实采
+- 集成 gidy-client-core（JNI/UniFFI）
+
+
 ## v0.2.6 - 2026-05-16
 
 ### 变更内容
