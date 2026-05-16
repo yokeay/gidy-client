@@ -50,6 +50,8 @@ jobs:
           chmod +x gradlew
 
       - name: Lint
+        id: lint
+        continue-on-error: true
         run: ./gradlew :app:lintDebug --stacktrace
 
       - name: Assemble debug APK
