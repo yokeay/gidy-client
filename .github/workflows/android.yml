@@ -52,24 +52,37 @@ jobs:
       - name: Lint
         id: lint
         continue-on-error: true
-        run: ./gradlew :app:lintDebug --stacktrace --info
+        run: ./gradlew :app:lintDebug --stacktrace --info 2>&1 | tee lint-log.txt
 
       - name: Assemble debug APK
         id: assemble
         continue-on-error: true
-        run: ./gradlew :app:assembleDebug --stacktrace --info 2>&1 | tee gidy-android/build-log.txt
+        run: ./gradlew :app:assembleDebug --stacktrace --info 2>&1 | tee build-log.txt
 
-      - name: Tail build log on failure
+      - name: Show build log tail on failure
         if: steps.assemble.outcome == 'failure'
         run: |
-          echo "=========== LAST 400 LINES OF BUILD LOG ==========="
-          tail -n 400 gidy-android/build-log.txt || true
-          echo "=========== GRADLE PROBLEMS REPORT ==========="
-          find gidy-android -path '*/build/reports/problems*' -type f | while read f; do
-            echo "--- $f ---"; cat "$f"
-          done
-          echo "=========== COMPILE ERRORS ==========="
-          grep -nE "e: |error:|FAILED|What went wrong|Caused by" gidy-android/build-log.txt | head -100 || true
+          echo "::group::LAST 500 LINES OF BUILD LOG"
+          tail -n 500 build-log.txt || true
+          echo "::endgroup::"
+          echo "::group::COMPILE ERRORS GREP"
+          grep -nE "e: |error:|FAILED|What went wrong|Caused by|Unresolved reference|cannot find symbol" build-log.txt | head -200 || true
+          echo "::endgroup::"
+          echo "::group::PROBLEMS REPORT"
+          find . -path '*/build/reports/problems*' -type f -print -exec cat {} \; || true
+          echo "::endgroup::"
+
+      - name: Push build error tail to Feishu
+        if: steps.assemble.outcome == 'failure'
+        env:
+          FEISHU_WEBHOOK: https://open.feishu.cn/open-apis/bot/v2/hook/9f51596d-b832-4f42-a216-9752044c48b9
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          ERR=$(grep -nE "e: |error:|FAILED|What went wrong|Caused by|Unresolved reference|cannot find symbol" build-log.txt | head -60 || true)
+          TAIL=$(tail -n 150 build-log.txt || true)
+          export ERR TAIL
+          python3 ../.github/workflows/scripts/push_build_failure.py
 
       - name: Upload build log
         if: always()
@@ -78,8 +91,9 @@ jobs:
           name: gidy-android-build-log
           path: |
             gidy-android/build-log.txt
+            gidy-android/lint-log.txt
             gidy-android/app/build/reports/**
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Upload debug APK
