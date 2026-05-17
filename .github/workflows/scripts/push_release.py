@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Push Android CI failure tail to Feishu webhook."""
+"""Push Android release outcome to Feishu webhook."""
 import json
 import os
 import sys
@@ -9,38 +9,41 @@ import urllib.request
 def main() -> int:
     webhook = os.environ.get("FEISHU_WEBHOOK")
     if not webhook:
-        print("FEISHU_WEBHOOK env missing, skip push")
         return 0
-    err = (os.environ.get("ERR", "") or "")[:6000] or "(none matched)"
-    tail = (os.environ.get("TAIL", "") or "")[-12000:]
+    tag = os.environ.get("TAG", "")
     run_url = os.environ.get("RUN_URL", "")
-    sha = (os.environ.get("SHA", "") or "")[:7]
+    release_url = os.environ.get("RELEASE_URL", "")
+    status = (os.environ.get("STATUS", "") or "").lower()
+    success = status == "success"
+    title = (
+        f"🔔 【通知】Android Release {tag} 已发布"
+        if success
+        else f"⚠️ 【告警】Android Release {tag} 失败"
+    )
+    template = "green" if success else "orange"
     content = (
-        "**❌ Android assembleDebug 失败**\n\n"
+        f"**Tag:** `{tag}`\n"
+        f"**状态:** {'✅ 成功' if success else '❌ 失败'}\n"
         f"**Run:** {run_url}\n"
-        f"**Commit:** `{sha}`\n\n"
-        "**Critical errors:**\n```\n" + err + "\n```\n\n"
-        "**Build log tail (150 lines):**\n```\n" + tail + "\n```"
+        f"**Release:** {release_url}\n\n"
+        + ("APK 已附在 Release assets 下载使用。" if success else "请查看 Run 日志定位错误。")
     )
     payload = {
         "msg_type": "interactive",
         "card": {
             "header": {
-                "title": {
-                    "tag": "plain_text",
-                    "content": "⚠️ 【告警】Android CI 失败 · assembleDebug",
-                },
-                "template": "orange",
+                "title": {"tag": "plain_text", "content": title},
+                "template": template,
             },
             "elements": [
-                {"tag": "markdown", "content": content[:28000]},
+                {"tag": "markdown", "content": content},
                 {"tag": "hr"},
                 {
                     "tag": "note",
                     "elements": [
                         {
                             "tag": "plain_text",
-                            "content": "来源：GitHub Actions android.yml | 自动错误日志",
+                            "content": "来源：GitHub Actions android.yml | Release pipeline",
                         }
                     ],
                 },
@@ -57,7 +60,6 @@ def main() -> int:
             print(resp.read().decode())
     except Exception as exc:
         print(f"feishu push failed: {exc}", file=sys.stderr)
-        return 0  # don't fail the diagnostic step itself
     return 0
 
 

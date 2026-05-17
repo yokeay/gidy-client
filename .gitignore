@@ -16,6 +16,10 @@ Thumbs.db
 # Certificates & key files
 *.pem
 *.key
+*.jks
+*.keystore
+*.p12
+*.pfx
 
 # Environment
 .env
