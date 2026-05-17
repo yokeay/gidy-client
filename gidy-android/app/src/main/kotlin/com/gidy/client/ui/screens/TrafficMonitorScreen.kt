@@ -1,5 +1,6 @@
 package com.gidy.client.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -178,7 +179,7 @@ private fun HorizontalDivider() {
             .fillMaxWidth()
             .padding(start = 18.dp)
             .height(0.5.dp)
-            .androidx.compose.foundation.background(MaterialTheme.colorScheme.outline),
+            .background(MaterialTheme.colorScheme.outline),
     )
 }
 
