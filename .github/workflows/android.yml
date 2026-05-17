@@ -96,12 +96,22 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: List APK outputs (diagnostic)
+        if: always()
+        run: |
+          echo "::group::find app/build for *.apk"
+          find app/build -type f -name '*.apk' -print 2>/dev/null || true
+          echo "::endgroup::"
+          echo "::group::ls -la app/build/outputs/apk (if exists)"
+          ls -laR app/build/outputs/apk 2>/dev/null || echo "(no apk outputs dir)"
+          echo "::endgroup::"
+
       - name: Upload debug APK
         if: steps.assemble.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: gidy-android-debug
-          path: gidy-android/app/build/outputs/apk/debug/*.apk
+          path: gidy-android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14
 
