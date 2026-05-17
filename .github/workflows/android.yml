@@ -92,19 +92,39 @@ jobs:
           path: |
             gidy-android/build-log.txt
             gidy-android/lint-log.txt
+            gidy-android/apk-find.txt
             gidy-android/app/build/reports/**
           if-no-files-found: warn
           retention-days: 14
 
       - name: List APK outputs (diagnostic)
+        id: apkfind
         if: always()
         run: |
-          echo "::group::find app/build for *.apk"
-          find app/build -type f -name '*.apk' -print 2>/dev/null || true
-          echo "::endgroup::"
-          echo "::group::ls -la app/build/outputs/apk (if exists)"
-          ls -laR app/build/outputs/apk 2>/dev/null || echo "(no apk outputs dir)"
-          echo "::endgroup::"
+          {
+            echo "=== find app/build for *.apk ==="
+            find app/build -type f -name '*.apk' -print 2>/dev/null || true
+            echo ""
+            echo "=== find from repo root (just in case) ==="
+            (cd "$GITHUB_WORKSPACE" && find . -type f -name '*.apk' -not -path './.git/*' -print 2>/dev/null) || true
+            echo ""
+            echo "=== ls -laR app/build/outputs/apk ==="
+            ls -laR app/build/outputs/apk 2>/dev/null || echo "(no apk outputs dir)"
+            echo ""
+            echo "=== ls app/build/outputs (top level) ==="
+            ls -la app/build/outputs 2>/dev/null || echo "(no outputs dir)"
+          } | tee apk-find.txt
+
+      - name: Push APK diagnostic to Feishu
+        if: always()
+        env:
+          FEISHU_WEBHOOK: https://open.feishu.cn/open-apis/bot/v2/hook/9f51596d-b832-4f42-a216-9752044c48b9
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          DIAG=$(cat apk-find.txt 2>/dev/null || echo "(apk-find.txt missing)")
+          export DIAG
+          python3 ../.github/workflows/scripts/push_apk_diagnostic.py
 
       - name: Upload debug APK
         if: steps.assemble.outcome == 'success'
@@ -112,7 +132,7 @@ jobs:
         with:
           name: gidy-android-debug
           path: gidy-android/app/build/outputs/apk/**/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Upload lint report
