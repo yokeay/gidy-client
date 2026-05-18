@@ -1,0 +1,37 @@
+# Gradle
+.gradle/
+build/
+**/build/
+gradle-app.setting
+!gradle-wrapper.jar
+.gradletasknamecache
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/
+
+# Local config
+local.properties
+
+# Keystore / signing (NEVER commit)
+*.jks
+*.keystore
+keystore.properties
+
+# Generated
+*.apk
+*.aab
+*.ap_
+*.dex
+release/
+
+# Logs / temp
+*.log
+hs_err_pid*
+
+# Mac
+.DS_Store

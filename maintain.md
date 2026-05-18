@@ -1,3 +1,72 @@
+## v0.2.7 - 2026-05-16 · Android Stage 1（入库 + CI）
+
+### 变更内容
+- gidy-android/ Compose UI shell 入库（Kotlin 2.0 + Material3，UI 与 GUI 黑白灰主题一致）
+  - 5 个屏幕：Dashboard / SystemConfig / TrafficMonitor / UserSettings / About
+  - 8 个组件：Speedometer / SpeedChart / KpiCard / AppleCard / AppleSwitch / SegmentedToggle / SectionHeader / StatusBadge
+  - DataStore Preferences 骨架（ConfigDataStore + Config + MockStats）
+  - Navigation Compose 底部导航 + 中/英 i18n（values/strings.xml + values-zh/strings.xml）
+  - Apple-like 主题（Theme.kt / Color.kt / Shape.kt / Type.kt），含 light/dark
+- 新增 gidy-android/.gitignore（覆盖 .gradle/build/keystore/.aab/.apk/local.properties 等，强化签名密钥屏蔽）
+- 新增 .github/workflows/android.yml（push 触发：lintDebug + assembleDebug + 上传 APK & lint 报告 artifacts，仅在 gidy-android/** 变更时触发）
+- 本地不执行 build；CI 在 ubuntu-latest 上跑 JDK 17 + Android SDK，按需自动生成 Gradle wrapper
+- 更新 plan.md：新增 Android 客户端四阶段任务，Stage 1 标记完成
+
+### 影响范围
+- gidy-android/（新建，全量）
+- .github/workflows/android.yml（新建）
+- plan.md
+- maintain.md
+
+### 功能列表
+- Android UI shell 完整入库可被 IDE 直接打开
+- CI 自动产出 unsigned debug APK 作为 artifacts（保留 14 天）
+- Android 与 Rust/Tauri CI 工作流解耦，互不触发
+
+### 待办（Stage 2 起）
+- VpnService 前台服务 + tun 接管
+- DataStore 真实读写替换 Mock
+- 连接开关、流量统计实采
+- 集成 gidy-client-core（JNI/UniFFI）
+
+
+## v0.2.6 - 2026-05-16
+
+### 变更内容
+- GUI 全面 1:1 复刻重构（按 docs/ 设计稿，仅换皮，不动 API/路由/Tauri 逻辑）
+- index.css 主题变量重写：纯黑白灰（zinc/neutral 系），强化 light/dark；新增 .tabular 等宽数字工具类与 scroll-thin 滚动条
+- Sidebar：w-56，h-20 Logo 区+slogan，菜单项左侧高亮指示条
+- Speedometer 重写：270° 表盘 + 主次刻度 + tabular 中央数字
+- SpeedChart：双 Area 图，download 实线 / upload 虚线，纯黑白配色
+- TrafficMonitor：顶部 4 列 KPI（实时/累计 上/下行）+ 表盘(col-span-1)与图表(col-span-2)并排 + 连接日志表
+- SystemConfig：新增连接状态徽章（脉冲点 + connected/disconnected），卡片统一 rounded-2xl
+- UserSettings：卡片 rounded-2xl，设置项视觉更克制
+- Dashboard：Banner 去翠绿，改 bg-foreground/text-background 反白卡，按钮统一
+- About：rounded-2xl 卡片 + Repository 链接
+- App.tsx：header h-14 px-8 + main px-8 py-6 scroll-thin
+- 窗口默认 1100x720，最小 980x640（容纳 4 列 KPI）
+- 版本号同步 0.2.3 → 0.2.6（package.json / tauri.conf.json / About 常量）
+- .gitignore 新增 .claude/ 与 clod.sh
+
+### 影响范围
+- gidy-client-gui/src/index.css
+- gidy-client-gui/src/App.tsx
+- gidy-client-gui/src/components/（Sidebar, Speedometer, SpeedChart）
+- gidy-client-gui/src/pages/（Dashboard, TrafficMonitor, SystemConfig, UserSettings, About）
+- gidy-client-gui/package.json（version）
+- gidy-client-gui/src-tauri/tauri.conf.json（version + 窗口尺寸）
+- docs/（设计稿入仓）
+- .gitignore
+
+### 功能列表
+- 完整黑白灰主题（light/dark）一致性
+- 等宽数字渲染（流量数字 / 时间 / 端口等）
+- 连接状态可视化徽章（脉冲点）
+- 4 列流量 KPI + 仪表盘/趋势图并排
+
+### 已知告警
+- 项目根目录 clod.sh 存在硬编码 OPENAI_API_KEY / ANTHROPIC_AUTH_TOKEN（违反 SECTION 7 / 18）；已加入 .gitignore 防止误提交，但**仍建议旋转 Token 并迁移至 .env**
+
 ## v0.2.5 - 2026-05-09
 
 ### 变更内容

@@ -1,9 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowUp, ArrowDown, Database, HardDrive } from "lucide-react";
 import Speedometer from "../components/Speedometer";
 import SpeedChart from "../components/SpeedChart";
-import { getStats, getStatus, formatBytes, formatSpeed, StatsSnapshot } from "../api";
+import {
+  getStats,
+  getStatus,
+  formatBytes,
+  formatSpeed,
+  StatsSnapshot,
+} from "../api";
 
 interface ChartPoint {
   time: number;
@@ -19,11 +25,35 @@ interface ConnectionLog {
   duration: string;
 }
 
+interface KpiCardProps {
+  label: string;
+  value: string;
+  Icon: typeof ArrowUp;
+}
+
+function KpiCard({ label, value, Icon }: KpiCardProps) {
+  return (
+    <div className="bg-card rounded-2xl border border-border p-5">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        <Icon size={14} strokeWidth={1.75} className="text-muted-foreground" />
+      </div>
+      <p className="text-2xl font-semibold tabular text-foreground">{value}</p>
+    </div>
+  );
+}
+
 export default function TrafficMonitor() {
   const { t } = useTranslation();
   const [stats, setStats] = useState<StatsSnapshot>({
-    bytes_up: 0, bytes_down: 0, speed_up_kbps: 0,
-    speed_down_kbps: 0, uptime_secs: 0, active_connections: 0,
+    bytes_up: 0,
+    bytes_down: 0,
+    speed_up_kbps: 0,
+    speed_down_kbps: 0,
+    uptime_secs: 0,
+    active_connections: 0,
   });
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
   const [logs, setLogs] = useState<ConnectionLog[]>([]);
@@ -38,15 +68,18 @@ export default function TrafficMonitor() {
       const [s, st] = await Promise.all([getStats(), getStatus()]);
       setStats(s);
       setRunning(st.running);
-      setChartData(prev => {
-        const next = [...prev, { time: Date.now(), up: s.speed_up_kbps, down: s.speed_down_kbps }];
+      setChartData((prev) => {
+        const next = [
+          ...prev,
+          { time: Date.now(), up: s.speed_up_kbps, down: s.speed_down_kbps },
+        ];
         if (next.length > 60) return next.slice(-60);
         return next;
       });
       if (s.active_connections > 0 && st.running) {
         const id = ++logidRef.current;
         const types = ["HTTP", "HTTPS", "SOCKS5"];
-        setLogs(prev => {
+        setLogs((prev) => {
           const entry: ConnectionLog = {
             time: new Date().toLocaleTimeString(),
             target: `conn-${id}.example.com`,
@@ -69,84 +102,97 @@ export default function TrafficMonitor() {
   }, [refresh]);
 
   return (
-    <div className="space-y-6">
-      {/* Speedometer */}
-      <div className="bg-card rounded-xl border border-border p-6 flex flex-col items-center">
-        {running ? (
-          <Speedometer speedKbps={totalSpeed} maxKbps={2000} />
-        ) : (
-          <Speedometer speedKbps={0} maxKbps={2000} />
-        )}
-        <div className="flex items-center gap-8 mt-4">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="w-3 h-3 rounded-full bg-chart-up" />
-            <span className="text-muted-foreground">{t("trafficMonitor.upload")}</span>
-            <span className="font-mono font-semibold text-chart-up">{formatSpeed(stats.speed_up_kbps)}</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="w-3 h-3 rounded-full bg-chart-down" />
-            <span className="text-muted-foreground">{t("trafficMonitor.download")}</span>
-            <span className="font-mono font-semibold text-chart-down">{formatSpeed(stats.speed_down_kbps)}</span>
-          </div>
+    <div className="space-y-5">
+      {/* Top 4 KPI cards */}
+      <div className="grid grid-cols-4 gap-4">
+        <KpiCard
+          label={t("trafficMonitor.upload")}
+          value={formatSpeed(stats.speed_up_kbps)}
+          Icon={ArrowUp}
+        />
+        <KpiCard
+          label={t("trafficMonitor.download")}
+          value={formatSpeed(stats.speed_down_kbps)}
+          Icon={ArrowDown}
+        />
+        <KpiCard
+          label={t("trafficMonitor.totalUpload")}
+          value={formatBytes(stats.bytes_up)}
+          Icon={HardDrive}
+        />
+        <KpiCard
+          label={t("trafficMonitor.totalDownload")}
+          value={formatBytes(stats.bytes_down)}
+          Icon={Database}
+        />
+      </div>
+
+      {/* Speedometer + Chart side-by-side */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="col-span-1 bg-card rounded-2xl border border-border p-5 flex flex-col items-center justify-center">
+          <Speedometer speedKbps={running ? totalSpeed : 0} maxKbps={2000} />
+        </div>
+        <div className="col-span-2 bg-card rounded-2xl border border-border p-5 h-[280px]">
+          <SpeedChart data={chartData} />
         </div>
       </div>
 
-      {/* Speed cards */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-card rounded-xl border border-border p-4">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-            <ArrowUp size={14} className="text-chart-up" />
-            {t("trafficMonitor.upload")}
-          </div>
-          <p className="text-2xl font-bold font-mono">{formatSpeed(stats.speed_up_kbps)}</p>
-          <p className="text-xs text-muted-foreground mt-2">
-            {t("trafficMonitor.totalUpload")}: {formatBytes(stats.bytes_up)}
-          </p>
+      {/* Connection Log */}
+      <div className="bg-card rounded-2xl border border-border">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <h3 className="text-sm font-semibold">
+            {t("trafficMonitor.connectionLog")}
+          </h3>
+          <span className="text-xs text-muted-foreground tabular">
+            {logs.length}
+          </span>
         </div>
-        <div className="bg-card rounded-xl border border-border p-4">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-            <ArrowDown size={14} className="text-chart-down" />
-            {t("trafficMonitor.download")}
-          </div>
-          <p className="text-2xl font-bold font-mono">{formatSpeed(stats.speed_down_kbps)}</p>
-          <p className="text-xs text-muted-foreground mt-2">
-            {t("trafficMonitor.totalDownload")}: {formatBytes(stats.bytes_down)}
-          </p>
-        </div>
-      </div>
-
-      {/* Speed Chart */}
-      <SpeedChart data={chartData} />
-
-      {/* Connection Log Table */}
-      <div className="bg-card rounded-xl border border-border p-4">
-        <h3 className="text-sm font-semibold mb-3">{t("trafficMonitor.connectionLog")}</h3>
-        <div className="overflow-auto max-h-64">
+        <div className="scroll-thin overflow-auto max-h-64">
           <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border text-muted-foreground">
-                <th className="text-left py-2 font-medium">{t("trafficMonitor.time")}</th>
-                <th className="text-left py-2 font-medium">{t("trafficMonitor.target")}</th>
-                <th className="text-left py-2 font-medium">{t("trafficMonitor.type")}</th>
-                <th className="text-left py-2 font-medium">{t("trafficMonitor.size")}</th>
-                <th className="text-left py-2 font-medium">{t("trafficMonitor.duration")}</th>
+            <thead className="sticky top-0 bg-card">
+              <tr className="text-muted-foreground border-b border-border">
+                <th className="text-left py-2.5 px-5 font-medium uppercase tracking-wider text-[10px]">
+                  {t("trafficMonitor.time")}
+                </th>
+                <th className="text-left py-2.5 px-3 font-medium uppercase tracking-wider text-[10px]">
+                  {t("trafficMonitor.target")}
+                </th>
+                <th className="text-left py-2.5 px-3 font-medium uppercase tracking-wider text-[10px]">
+                  {t("trafficMonitor.type")}
+                </th>
+                <th className="text-left py-2.5 px-3 font-medium uppercase tracking-wider text-[10px]">
+                  {t("trafficMonitor.size")}
+                </th>
+                <th className="text-left py-2.5 px-5 font-medium uppercase tracking-wider text-[10px]">
+                  {t("trafficMonitor.duration")}
+                </th>
               </tr>
             </thead>
             <tbody>
               {logs.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-muted-foreground">
+                  <td
+                    colSpan={5}
+                    className="py-12 text-center text-muted-foreground"
+                  >
                     {t("trafficMonitor.noData")}
                   </td>
                 </tr>
               ) : (
                 logs.map((log, i) => (
-                  <tr key={i} className="border-b border-border/50 hover:bg-muted/50">
-                    <td className="py-2 font-mono">{log.time}</td>
-                    <td className="py-2">{log.target}</td>
-                    <td className="py-2">{log.type}</td>
-                    <td className="py-2 font-mono">{log.size}</td>
-                    <td className="py-2 font-mono">{log.duration}</td>
+                  <tr
+                    key={i}
+                    className="border-b border-border/50 hover:bg-muted/40 transition-colors"
+                  >
+                    <td className="py-2.5 px-5 tabular">{log.time}</td>
+                    <td className="py-2.5 px-3">{log.target}</td>
+                    <td className="py-2.5 px-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-[10px] font-medium">
+                        {log.type}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 tabular">{log.size}</td>
+                    <td className="py-2.5 px-5 tabular">{log.duration}</td>
                   </tr>
                 ))
               )}

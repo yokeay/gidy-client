@@ -3,7 +3,7 @@ members = ["gidy-client-core", "gidy-client-cli", "gidy-client-gui/src-tauri"]
 resolver = "2"
 
 [workspace.package]
-version = "0.2.5"
+version = "0.2.7"
 edition = "2021"
 license = "MIT"
 description = "gidy proxy protocol - client"

@@ -40,25 +40,37 @@ jobs:
         run: npm run build
         working-directory: gidy-client-gui
 
-      - name: Build GUI (Tauri)
-        run: npx tauri build --no-bundle
+      - name: Build GUI (Tauri bundle – AppImage + deb)
+        run: npx tauri build --bundles appimage,deb
         working-directory: gidy-client-gui
 
       - name: Build CLI
         run: cargo build --release -p gidy-client-cli
 
-      - name: Package
+      - name: Package CLI
         run: |
           cd target/release
-          tar czf ../../gidy-client-linux-x86_64.tar.gz gidy-client gidy-client-gui
-          sha256sum ../../gidy-client-linux-x86_64.tar.gz > ../../gidy-client-linux-x86_64.tar.gz.sha256
+          tar czf ../../gidy-client-cli-linux-x86_64.tar.gz gidy-client
+          sha256sum ../../gidy-client-cli-linux-x86_64.tar.gz > ../../gidy-client-cli-linux-x86_64.tar.gz.sha256
+
+      - name: Collect GUI bundles
+        run: |
+          find gidy-client-gui/src-tauri/target/release/bundle -type f \( -name "*.AppImage" -o -name "*.deb" \) | while read f; do
+            cp "$f" .
+            sha256sum "$(basename $f)" > "$(basename $f).sha256"
+          done
+        shell: bash
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            gidy-client-linux-x86_64.tar.gz
-            gidy-client-linux-x86_64.tar.gz.sha256
+            gidy-client-cli-linux-x86_64.tar.gz
+            gidy-client-cli-linux-x86_64.tar.gz.sha256
+            *.AppImage
+            *.deb
+            *.AppImage.sha256
+            *.deb.sha256
           generate_release_notes: true
 
   release-windows:
@@ -82,6 +94,12 @@ jobs:
           cache: npm
           cache-dependency-path: gidy-client-gui/package-lock.json
 
+      - name: Install WiX Toolset (for MSI)
+        run: |
+          choco install wixtoolset -y
+          echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" >> $GITHUB_PATH
+        shell: bash
+
       - name: npm ci
         run: npm ci
         working-directory: gidy-client-gui
@@ -90,25 +108,27 @@ jobs:
         run: npm run build
         working-directory: gidy-client-gui
 
-      - name: Build GUI (Tauri)
-        run: npx tauri build --no-bundle
+      - name: Build GUI (Tauri bundle – NSIS + MSI)
+        run: npx tauri build --bundles nsis,msi
         working-directory: gidy-client-gui
         shell: bash
 
       - name: Build CLI
         run: cargo build --release -p gidy-client-cli
 
-      - name: Package
+      - name: Collect installers
         run: |
-          cd target/release
-          tar czf ../../gidy-client-windows-x86_64.tar.gz gidy-client.exe gidy-client-gui.exe
-          sha256sum ../../gidy-client-windows-x86_64.tar.gz > ../../gidy-client-windows-x86_64.tar.gz.sha256
+          find gidy-client-gui/src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) | while read f; do
+            cp "$f" .
+            sha256sum "$(basename $f)" > "$(basename $f).sha256"
+          done
         shell: bash
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            gidy-client-windows-x86_64.tar.gz
-            gidy-client-windows-x86_64.tar.gz.sha256
+            *.exe
+            *.msi
+            *.sha256
           generate_release_notes: true
