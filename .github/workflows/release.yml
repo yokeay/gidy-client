@@ -55,7 +55,7 @@ jobs:
 
       - name: Collect GUI bundles
         run: |
-          find gidy-client-gui/src-tauri/target/release/bundle -type f \( -name "*.AppImage" -o -name "*.deb" \) | while read f; do
+          find target/release/bundle -type f \( -name "*.AppImage" -o -name "*.deb" \) | while read f; do
             cp "$f" .
             sha256sum "$(basename $f)" > "$(basename $f).sha256"
           done
@@ -118,7 +118,7 @@ jobs:
 
       - name: Collect installers
         run: |
-          find gidy-client-gui/src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) | while read f; do
+          find target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) | while read f; do
             cp "$f" .
             sha256sum "$(basename $f)" > "$(basename $f).sha256"
           done
