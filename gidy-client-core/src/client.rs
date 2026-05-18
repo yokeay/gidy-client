@@ -1,24 +1,45 @@
 use crate::config::ClientConfig;
 use crate::stats::TrafficStats;
-use bytes::{Buf, Bytes};
-use gidy_core::{Credentials, H3_ALPN, PSEUDO_HOST_CHECK};
+use gidy_core::{
+    AuthStatus, DataCmd, DpmParams, Frame, FrameCodec,
+    build_auth_fragments,
+    current_epoch, deobfuscate, derive_auth_key, derive_obfs_key, is_gidy_packet, obfuscate,
+};
+use quinn::{Endpoint, RecvStream};
+use rand::SeedableRng;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use tracing::info;
 
 pub struct GidyClient {
     config: Arc<ClientConfig>,
     psk: [u8; 32],
+    obfs_key: [u8; 32],
+    #[allow(dead_code)]
+    auth_key: [u8; 32],
+    stats: Arc<TrafficStats>,
+}
+
+pub struct Tunnel {
+    quic: Arc<quinn::Connection>,
+    stream_id: u16,
+    seq: Mutex<u32>,
+    dpm: DpmParams,
+    codec: FrameCodec,
+    obfs_key: [u8; 32],
     stats: Arc<TrafficStats>,
 }
 
 impl GidyClient {
     pub fn new(config: ClientConfig, stats: Arc<TrafficStats>) -> Result<Self, String> {
         let psk = config.psk()?;
+        let obfs_key = derive_obfs_key(&psk);
+        let auth_key = derive_auth_key(&psk);
         Ok(Self {
             config: Arc::new(config),
             psk,
+            obfs_key,
+            auth_key,
             stats,
         })
     }
@@ -26,221 +47,400 @@ impl GidyClient {
     pub async fn connect(&self) -> Result<Connection, String> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
+        let server_addr = self.config.server_addr.clone();
+        let server_name = self.config.server_name.clone();
+
         let roots = rustls::RootCertStore::empty();
         let mut client_crypto = rustls::ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth();
+
         client_crypto
             .dangerous()
             .set_certificate_verifier(Arc::new(NoVerify));
-        client_crypto.alpn_protocols = vec![H3_ALPN.to_vec()];
 
         let mut transport = quinn::TransportConfig::default();
         transport.keep_alive_interval(Some(std::time::Duration::from_secs(15)));
 
         let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto)
-            .map_err(|e| format!("quic crypto: {}", e))?;
+            .map_err(|e| format!("quic crypto config: {}", e))?;
         let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
         client_config.transport_config(Arc::new(transport));
 
-        let endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().unwrap())
-            .map_err(|e| format!("client endpoint: {}", e))?;
+        let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())
+            .map_err(|e| format!("failed to create client endpoint: {}", e))?;
 
-        let addr: std::net::SocketAddr = self
-            .config
-            .server_addr
+        let addr = server_addr
             .parse()
-            .map_err(|e| format!("invalid server addr: {}", e))?;
+            .map_err(|e| format!("invalid server addr {}: {}", server_addr, e))?;
 
-        info!("connecting to {}...", addr);
-        let quinn_conn = endpoint
-            .connect_with(client_config, addr, &self.config.server_name)
-            .map_err(|e| format!("connect: {}", e))?
+        info!("connecting to gidy-server at {}...", addr);
+        let quic_conn = endpoint
+            .connect_with(client_config, addr, &server_name)
+            .map_err(|e| format!("failed to connect: {}", e))?
             .await
-            .map_err(|e| format!("QUIC: {}", e))?;
+            .map_err(|e| format!("connection error: {}", e))?;
 
-        info!("QUIC connected, setting up h3...");
+        info!("QUIC connection established");
 
-        let h3_conn = h3_quinn::Connection::new(quinn_conn);
-        let (_h3_driver, send_request) = h3::client::builder()
-            .build(h3_conn)
-            .await
-            .map_err(|e| format!("h3 init: {}", e))?;
+        let (session_id, dpm, matched_epoch) =
+            self.authenticate(&quic_conn).await?;
 
-        // h3_driver handles connection-level events (GOAWAY, push, etc.)
-        // Spawn it in background to keep the protocol running
-        tokio::spawn(async move {
-            // Drive h3 connection by reading incoming control frames
-            // _h3_driver will be dropped here, which is OK for basic usage
-            // For production: poll _h3_driver for events in a loop
-            let _ = _h3_driver;
-        });
-
-        info!("h3 client ready (ALPN: h3)");
+        info!(
+            "auth success: session {:02x?}, epoch {}",
+            &session_id[..4],
+            matched_epoch
+        );
 
         Ok(Connection {
-            send_request: Arc::new(Mutex::new(send_request)),
-            psk: self.psk,
+            quic: Arc::new(quic_conn),
+            session_id,
+            dpm,
+            matched_epoch,
+            codec: FrameCodec::new(),
+            obfs_key: self.obfs_key,
             stats: self.stats.clone(),
+            next_stream_id: Mutex::new(1),
         })
+    }
+
+    async fn authenticate(
+        &self,
+        conn: &quinn::Connection,
+    ) -> Result<([u8; 16], DpmParams, u64), String> {
+        let epoch = current_epoch();
+        let dpm = DpmParams::derive(&self.psk, epoch, 4)
+            .map_err(|e| format!("dpm derive: {}", e))?;
+
+        let client_challenge = {
+            let mut c = [0u8; 32];
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            let seed = t.as_nanos().to_le_bytes();
+            let hash = blake3::hash(&seed);
+            c.copy_from_slice(hash.as_bytes());
+            c
+        };
+
+        info!("building auth fragments...");
+        let (fragments, _interval) =
+            build_auth_fragments(&dpm, &client_challenge, 0x01, epoch, 100);
+
+        let codec = FrameCodec::new();
+
+        for (i, frag) in fragments.iter().enumerate() {
+            let encoded = {
+                let mut rng = rand_chacha::ChaCha20Rng::from_seed({
+                    let mut seed = [0u8; 32];
+                    seed[..8].copy_from_slice(&i.to_le_bytes());
+                    seed
+                });
+                codec.encode(frag, &dpm, &mut rng)
+            };
+            let obfuscated = obfuscate(&self.obfs_key, &encoded);
+
+            let (mut send, _recv) = conn
+                .open_bi()
+                .await
+                .map_err(|e| format!("open bi for auth frag {}: {}", i, e))?;
+            send.write_all(&obfuscated)
+                .await
+                .map_err(|e| format!("write auth frag {}: {}", i, e))?;
+            send.finish().unwrap();
+        }
+
+        info!("sent {} auth fragments, waiting for response...", fragments.len());
+
+        let auth_deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+
+        loop {
+            if tokio::time::Instant::now() > auth_deadline {
+                return Err("auth response timeout".into());
+            }
+
+            match conn.accept_bi().await {
+                Ok((_send, recv)) => {
+                    let frame_data = read_stream_full(recv, 4096).await?;
+
+                    let raw = if is_gidy_packet(&frame_data) {
+                        deobfuscate(&self.obfs_key, &frame_data)
+                            .map_err(|e| format!("deobfuscate auth resp: {}", e))?
+                    } else {
+                        frame_data.to_vec()
+                    };
+
+                    let mut decoded: Option<Frame> = None;
+                    let candidate_epochs = [epoch, epoch.saturating_sub(1), epoch + 1];
+
+                    for &cand_epoch in &candidate_epochs {
+                        if let Ok(cand_dpm) = DpmParams::derive(&self.psk, cand_epoch, 4) {
+                            if let Ok(frame) = codec.decode(&raw, &cand_dpm) {
+                                decoded = Some(frame);
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some(Frame::AuthResp {
+                        status,
+                        assigned_bw_kbps,
+                        session_id,
+                        server_epoch,
+                        ..
+                    }) = decoded
+                    {
+                        if status != AuthStatus::Ok {
+                            return Err(format!("auth denied: {:?}", status));
+                        }
+
+                        info!(
+                            "auth OK: bw={}kbps, epoch={}",
+                            assigned_bw_kbps, server_epoch
+                        );
+
+                        let matched_dpm =
+                            DpmParams::derive(&self.psk, server_epoch, 4)
+                                .map_err(|e| format!("dpm server epoch: {}", e))?;
+
+                        return Ok((session_id, matched_dpm, server_epoch));
+                    }
+                }
+                Err(e) => return Err(format!("accept bi during auth: {}", e)),
+            }
+        }
     }
 }
 
-type H3SendRequest = h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>;
-type H3RequestStream = h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>;
-
 pub struct Connection {
-    send_request: Arc<Mutex<H3SendRequest>>,
-    psk: [u8; 32],
+    quic: Arc<quinn::Connection>,
+    pub session_id: [u8; 16],
+    pub dpm: DpmParams,
+    pub matched_epoch: u64,
+    codec: FrameCodec,
+    obfs_key: [u8; 32],
     stats: Arc<TrafficStats>,
+    next_stream_id: Mutex<u16>,
 }
 
 impl Connection {
-    /// Open a CONNECT tunnel to a TCP target
-    pub async fn connect_tcp(&self, host: &str, port: u16) -> Result<Tunnel, String> {
-        let authority = format!("{}:{}", host, port);
-        let psk_hex: String = self.psk.iter().map(|b| format!("{:02x}", b)).collect();
-        let creds = Credentials {
-            username: "gidy".to_string(),
-            password: psk_hex,
+    /// Returns (Tunnel, initial_response_data)
+    pub async fn open_tunnel(&self, target: &str) -> Result<(Tunnel, bytes::Bytes), String> {
+        let stream_id = {
+            let mut id = self.next_stream_id.lock().await;
+            let sid = *id;
+            *id = id.wrapping_add(1);
+            sid
         };
 
-        let uri = format!("https://{}", authority)
-            .parse::<http::Uri>()
-            .map_err(|e| format!("uri: {}", e))?;
+        let frame = Frame::DataReq {
+            stream_id,
+            seq_num: 0,
+            cmd: DataCmd::Connect,
+            payload: bytes::Bytes::copy_from_slice(target.as_bytes()),
+        };
 
-        let req = http::Request::builder()
-            .method(http::Method::CONNECT)
-            .uri(uri)
-            .header("proxy-authorization", creds.to_header())
-            .header("user-agent", "gidy/2.0.0")
-            .body(())
-            .map_err(|e| format!("build request: {}", e))?;
-
-        let mut sr = self.send_request.lock().await;
-        let mut stream = sr
-            .send_request(req)
+        let (mut send, recv) = self
+            .quic
+            .open_bi()
             .await
-            .map_err(|e| format!("send CONNECT: {}", e))?;
+            .map_err(|e| format!("open bi for tunnel: {}", e))?;
 
-        // Receive CONNECT response
-        let response = stream
-            .recv_response()
+        let encoded = {
+            let mut rng = rand_chacha::ChaCha20Rng::from_seed({
+                let mut seed = [0u8; 32];
+                seed[..2].copy_from_slice(&stream_id.to_le_bytes());
+                seed
+            });
+            self.codec.encode(&frame, &self.dpm, &mut rng)
+        };
+
+        info!(
+            "open_tunnel: encoded={}B opcodes: frag={:02x} resp={:02x} req={:02x} data_resp={:02x} ping={:02x} rst={:02x} | enc: sid_be={} sn_be={} vsid={} vseq={} | lpmode={} | epoch={}",
+            encoded.len(),
+            self.dpm.opcodes.auth_frag, self.dpm.opcodes.auth_resp, self.dpm.opcodes.data_req, self.dpm.opcodes.data_resp, self.dpm.opcodes.ping, self.dpm.opcodes.rst,
+            self.dpm.encoding.stream_id_be, self.dpm.encoding.seq_num_be, self.dpm.encoding.use_varint_stream_id, self.dpm.encoding.use_varint_seq,
+            self.dpm.len_prefix_mode,
+            self.matched_epoch,
+        );
+        info!("open_tunnel: encoded hex[0..64]: {:02x?}", &encoded[..encoded.len().min(64)]);
+
+        let obfuscated = obfuscate(&self.obfs_key, &encoded);
+
+        send.write_all(&obfuscated)
             .await
-            .map_err(|e| format!("recv response: {}", e))?;
+            .map_err(|e| format!("write connect req: {}", e))?;
+        send.finish().unwrap();
 
-        if response.status() != http::StatusCode::OK {
-            let _ = stream.finish().await;
-            return Err(format!("CONNECT denied: {}", response.status()));
+        self.stats.add_up(obfuscated.len() as u64);
+
+        let resp_data = read_stream_full(recv, 65536).await?;
+        let raw = if is_gidy_packet(&resp_data) {
+            deobfuscate(&self.obfs_key, &resp_data)
+                .map_err(|e| format!("deobfuscate resp: {}", e))?
+        } else {
+            resp_data.to_vec()
+        };
+
+        let resp_frame = self.codec.decode(&raw, &self.dpm)
+            .map_err(|e| format!("decode resp: {}", e))?;
+
+        match resp_frame {
+            Frame::DataResp {
+                status,
+                payload,
+                ..
+            } => {
+                if status != 0 {
+                    let msg = String::from_utf8_lossy(&payload);
+                    return Err(format!("connect failed: {}", msg));
+                }
+                self.stats.add_down(raw.len() as u64);
+
+                let init_data = payload;
+                Ok((Tunnel {
+                    quic: self.quic.clone(),
+                    stream_id,
+                    seq: Mutex::new(1),
+                    dpm: self.dpm.clone(),
+                    codec: self.codec.clone(),
+                    obfs_key: self.obfs_key,
+                    stats: self.stats.clone(),
+                }, init_data))
+            }
+            _ => Err("unexpected response frame".into()),
         }
-
-        self.stats.add_up(authority.len() as u64);
-        info!("CONNECT {} -> 200 OK", authority);
-
-        Ok(Tunnel {
-            stream: Arc::new(Mutex::new(stream)),
-            stats: self.stats.clone(),
-        })
     }
-
-    /// Health check via _check pseudo-host
-    pub async fn health_check(&self) -> Result<bool, String> {
-        let psk_hex: String = self.psk.iter().map(|b| format!("{:02x}", b)).collect();
-        let creds = Credentials {
-            username: "gidy".to_string(),
-            password: psk_hex,
-        };
-
-        let uri = format!("https://{}", PSEUDO_HOST_CHECK)
-            .parse::<http::Uri>()
-            .map_err(|e| format!("uri: {}", e))?;
-
-        let req = http::Request::builder()
-            .method(http::Method::CONNECT)
-            .uri(uri)
-            .header("proxy-authorization", creds.to_header())
-            .body(())
-            .map_err(|e| format!("build request: {}", e))?;
-
-        let mut sr = self.send_request.lock().await;
-        let mut stream = sr
-            .send_request(req)
-            .await
-            .map_err(|e| format!("send health: {}", e))?;
-
-        let response = stream
-            .recv_response()
-            .await
-            .map_err(|e| format!("recv response: {}", e))?;
-
-        Ok(response.status() == http::StatusCode::OK)
-    }
-}
-
-pub struct Tunnel {
-    stream: Arc<Mutex<H3RequestStream>>,
-    stats: Arc<TrafficStats>,
 }
 
 impl Tunnel {
-    /// Relay data bidirectionally between a TCP stream and this h3 tunnel
-    pub async fn relay(&self, tcp: tokio::net::TcpStream) -> Result<(), String> {
-        let (tcp_read, mut tcp_write) = tcp.into_split();
-        let stream = self.stream.clone();
-        let stream_reader = stream.clone();
-        let stream_writer = stream.clone();
+    /// Send data and receive response. Each call opens a new bi-stream.
+    pub async fn send(&self, data: &[u8]) -> Result<bytes::Bytes, String> {
+        let seq = {
+            let mut s = self.seq.lock().await;
+            let current = *s;
+            *s = s.wrapping_add(1);
+            current
+        };
 
-        // h3 -> TCP: read from h3, write to TCP
-        let h3_to_tcp = tokio::spawn(async move {
-            loop {
-                let data = {
-                    let mut s = stream_reader.lock().await;
-                    s.recv_data().await
-                };
-                match data {
-                    Ok(Some(mut buf)) => {
-                        if buf.remaining() == 0 {
-                            break;
-                        }
-                        let chunk = buf.copy_to_bytes(buf.remaining());
-                        if tcp_write.write_all(&chunk).await.is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(_) => break,
-                }
-            }
-        });
+        let frame = Frame::DataReq {
+            stream_id: self.stream_id,
+            seq_num: seq,
+            cmd: DataCmd::Data,
+            payload: bytes::Bytes::copy_from_slice(data),
+        };
 
-        // TCP -> h3: read from TCP, write to h3
-        let mut tcp_read = tcp_read;
-        let mut buf = [0u8; 8192];
+        let encoded = {
+            let mut rng = rand_chacha::ChaCha20Rng::from_seed({
+                let mut seed = [0u8; 32];
+                seed[..4].copy_from_slice(&seq.to_le_bytes());
+                seed
+            });
+            self.codec.encode(&frame, &self.dpm, &mut rng)
+        };
+        let obfuscated = obfuscate(&self.obfs_key, &encoded);
+
+        tracing::debug!("tunnel.send: opening bi-stream stream={} seq={} len={}", self.stream_id, seq, obfuscated.len());
+        let (mut send, mut recv) = self
+            .quic
+            .open_bi()
+            .await
+            .map_err(|e| format!("tunnel open bi: {}", e))?;
+
+        tracing::debug!("tunnel.send: writing {} bytes", obfuscated.len());
+        send.write_all(&obfuscated)
+            .await
+            .map_err(|e| format!("tunnel send: {}", e))?;
+        send.finish().unwrap();
+        self.stats.add_up(obfuscated.len() as u64 + data.len() as u64);
+
+        // Read streamed chunks: each chunk is [u32 LE len][obfuscated DataResp frame]
+        let mut all_data: Vec<u8> = Vec::new();
+        let mut chunk_count = 0u32;
         loop {
-            let n = match tcp_read.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(_) => break,
-            };
-
-            let data = Bytes::copy_from_slice(&buf[..n]);
-            {
-                let mut s = stream_writer.lock().await;
-                if s.send_data(data).await.is_err() {
+            let mut len_buf = [0u8; 4];
+            match read_exact(&mut recv, &mut len_buf).await {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::info!("tunnel.send: read_exact len_buf failed: {} (total so far: {} bytes in {} chunks)", e, all_data.len(), chunk_count);
                     break;
                 }
             }
-            self.stats.add_up(n as u64);
+            let chunk_len = u32::from_le_bytes(len_buf) as usize;
+            if chunk_len == 0 || chunk_len > 64 * 1024 * 1024 {
+                tracing::info!("tunnel.send: bad chunk_len={}, breaking (total so far: {} bytes in {} chunks)", chunk_len, all_data.len(), chunk_count);
+                break;
+            }
+
+            let mut chunk = vec![0u8; chunk_len];
+            read_exact(&mut recv, &mut chunk).await
+                .map_err(|e| format!("tunnel read chunk: {}", e))?;
+
+            let raw = if is_gidy_packet(&chunk) {
+                deobfuscate(&self.obfs_key, &chunk)
+                    .map_err(|e| format!("tunnel deobfuscate: {}", e))?
+            } else {
+                chunk
+            };
+
+            let frame = self.codec.decode(&raw, &self.dpm)
+                .map_err(|e| format!("tunnel decode chunk: {}", e))?;
+
+            match frame {
+                Frame::DataResp { status, payload, stream_id: sid, seq_num: sn } => {
+                    if status != 0 {
+                        return Err(format!("data resp error: {}", status));
+                    }
+                    if payload.is_empty() {
+                        tracing::info!("tunnel.send: end-of-stream marker (sid={} sn={}), total {} bytes in {} chunks", sid, sn, all_data.len(), chunk_count);
+                        break;
+                    }
+                    tracing::info!("tunnel.send: chunk #{} wire_len={} payload_len={} sid={} sn={} running_total={}", chunk_count, chunk_len, payload.len(), sid, sn, all_data.len() + payload.len());
+                    all_data.extend_from_slice(&payload);
+                    chunk_count += 1;
+                }
+                Frame::Rst { reason, .. } => {
+                    return Err(format!("stream reset: reason={}", reason));
+                }
+                _ => {
+                    tracing::info!("tunnel.send: unexpected frame type, ignoring");
+                }
+            }
         }
 
-        let _ = h3_to_tcp.await;
+        tracing::info!("tunnel.send: DONE received {} bytes total in {} chunks", all_data.len(), chunk_count);
+        self.stats.add_down(all_data.len() as u64);
+        Ok(bytes::Bytes::from(all_data))
+    }
 
-        // Finish h3 stream
-        {
-            let mut s = stream.lock().await;
-            let _ = s.finish().await;
-        }
+    pub async fn close(&self) -> Result<(), String> {
+        let frame = Frame::DataReq {
+            stream_id: self.stream_id,
+            seq_num: {
+                let mut s = self.seq.lock().await;
+                let current = *s;
+                *s = s.wrapping_add(1);
+                current
+            },
+            cmd: DataCmd::Close,
+            payload: bytes::Bytes::new(),
+        };
 
+        let encoded = {
+            let mut rng = rand_chacha::ChaCha20Rng::from_seed([0xCC; 32]);
+            self.codec.encode(&frame, &self.dpm, &mut rng)
+        };
+        let obfuscated = obfuscate(&self.obfs_key, &encoded);
+
+        let (mut send, _recv) = self
+            .quic
+            .open_bi()
+            .await
+            .map_err(|e| format!("tunnel close open bi: {}", e))?;
+
+        let _ = send.write_all(&obfuscated).await;
+        let _ = send.finish();
         Ok(())
     }
 }
@@ -285,4 +485,42 @@ impl rustls::client::danger::ServerCertVerifier for NoVerify {
             rustls::SignatureScheme::ED25519,
         ]
     }
+}
+
+async fn read_stream_full(mut recv: RecvStream, max_bytes: usize) -> Result<bytes::Bytes, String> {
+    let mut buf = Vec::new();
+    loop {
+        let mut chunk = vec![0u8; 4096];
+        match recv.read(&mut chunk).await {
+            Ok(Some(n)) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() >= max_bytes {
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                if buf.is_empty() {
+                    return Err(format!("read error: {}", e));
+                }
+                break;
+            }
+        }
+    }
+    Ok(bytes::Bytes::from(buf))
+}
+
+/// Read exactly `buf.len()` bytes from the stream, handling partial reads.
+async fn read_exact(recv: &mut RecvStream, buf: &mut [u8]) -> Result<(), String> {
+    let mut offset = 0;
+    while offset < buf.len() {
+        match recv.read(&mut buf[offset..]).await {
+            Ok(Some(n)) if n == 0 && offset == 0 => return Err("stream eof".into()),
+            Ok(Some(0)) => return Err("stream finished".into()),
+            Ok(Some(n)) => offset += n,
+            Ok(None) => return Err("stream finished".into()),
+            Err(e) => return Err(format!("read error: {}", e)),
+        }
+    }
+    Ok(())
 }
