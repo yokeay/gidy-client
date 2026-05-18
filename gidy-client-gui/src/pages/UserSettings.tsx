@@ -10,7 +10,7 @@ interface UserSettingsProps {
   onThemeColorChange: (c: string) => void;
 }
 
-const APP_VERSION = "v0.2.6";
+const APP_VERSION = "v0.2.7";
 
 const COLOR_OPTIONS = [
   { value: "blue", class: "bg-blue-500" },

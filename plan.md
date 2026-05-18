@@ -12,3 +12,9 @@
 - [ ] 前端单元测试（待补充）
 - [ ] Rust 后端单元测试（待补充）
 - [ ] 移除 clod.sh 硬编码 Token，迁移至 .env（高优先级·安全）
+
+## Android 客户端（feat/android-app）
+- [x] Stage 1: 入库 + GitHub Actions workflow（android.yml: lint + assembleDebug + artifacts） ✅ 2026-05-16
+- [ ] Stage 2: 核心功能（VpnService / DataStore 真实读写 / 连接开关 / 流量统计实采 / 配置表单）
+- [ ] Stage 3: 集成 gidy-client-core（Cargo NDK + UniFFI 生成 .so 与 Kotlin 绑定）
+- [ ] Stage 4: Review 与后续规划（签名 / Play 上架 / 减包 / 自动更新）

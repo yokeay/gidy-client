@@ -75,7 +75,7 @@ export default function Dashboard() {
               gidy client
             </p>
             <h2 className="text-3xl font-bold tabular">
-              {t("dashboard.version")} v0.2.6
+              {t("dashboard.version")} v0.2.7
             </h2>
             <p className="opacity-70 mt-2 text-sm">
               {status.connected
