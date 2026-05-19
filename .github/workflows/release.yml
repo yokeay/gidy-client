@@ -40,12 +40,14 @@ jobs:
         run: npm run build
         working-directory: gidy-client-gui
 
-      - name: Verify & fix index.html asset paths (must be relative)
+      - name: Verify & fix index.html asset paths (must be relative, no crossorigin)
         run: |
-          echo "=== dist/index.html content ==="
+          echo "=== dist/index.html before fix ==="
           cat gidy-client-gui/dist/index.html
-          # Force relative paths: replace href="/assets/ and src="/assets/ with ./ variants
+          # Ensure relative paths
           sed -i 's|href="/|href="./|g; s|src="/|src="./|g' gidy-client-gui/dist/index.html
+          # Remove crossorigin attribute (causes CORS block under tauri:// protocol)
+          sed -i 's| crossorigin||g' gidy-client-gui/dist/index.html
           echo "=== after fix ==="
           cat gidy-client-gui/dist/index.html
 
@@ -117,13 +119,15 @@ jobs:
         run: npm run build
         working-directory: gidy-client-gui
 
-      - name: Verify & fix index.html asset paths (must be relative)
+      - name: Verify & fix index.html asset paths (must be relative, no crossorigin)
         shell: bash
         run: |
-          echo "=== dist/index.html content ==="
+          echo "=== dist/index.html before fix ==="
           cat gidy-client-gui/dist/index.html
-          # Force relative paths: replace href="/assets/ and src="/assets/ with ./ variants
+          # Ensure relative paths
           sed -i 's|href="/|href="./|g; s|src="/|src="./|g' gidy-client-gui/dist/index.html
+          # Remove crossorigin attribute (causes CORS block under tauri:// protocol)
+          sed -i 's| crossorigin||g' gidy-client-gui/dist/index.html
           echo "=== after fix ==="
           cat gidy-client-gui/dist/index.html
 
