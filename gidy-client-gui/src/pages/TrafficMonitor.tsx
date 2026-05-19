@@ -130,7 +130,12 @@ export default function TrafficMonitor() {
       {/* Speedometer + Chart side-by-side */}
       <div className="grid grid-cols-3 gap-4">
         <div className="col-span-1 bg-card rounded-2xl border border-border p-5 flex flex-col items-center justify-center">
-          <Speedometer speedKbps={running ? totalSpeed : 0} maxKbps={2000} />
+          <Speedometer
+            speedKbps={running ? totalSpeed : 0}
+            maxKbps={2000}
+            upKbps={running ? stats.speed_up_kbps : 0}
+            downKbps={running ? stats.speed_down_kbps : 0}
+          />
         </div>
         <div className="col-span-2 bg-card rounded-2xl border border-border p-5 h-[280px]">
           <SpeedChart data={chartData} />

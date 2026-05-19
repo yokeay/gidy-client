@@ -64,9 +64,9 @@ export default function UserSettings({
   if (!config) return null;
 
   const toggleClass = (v: boolean) =>
-    `relative w-10 h-5 rounded-full transition-colors ${v ? "bg-foreground" : "bg-muted-foreground/30"}`;
+    `relative w-12 h-6 rounded-full transition-colors ${v ? "bg-foreground" : "bg-muted-foreground/30"}`;
   const knobClass = (v: boolean) =>
-    `absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-card transition-transform ${v ? "translate-x-5" : "translate-x-0"}`;
+    `absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-card shadow-sm transition-transform ${v ? "translate-x-6" : "translate-x-0"}`;
 
   return (
     <div className="space-y-5">

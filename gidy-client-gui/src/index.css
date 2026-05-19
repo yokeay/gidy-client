@@ -37,8 +37,8 @@
   --primary: #18181b;
   --primary-fg: #fafafa;
   --destructive: #ef4444;
-  --chart-up: #52525b;
-  --chart-down: #18181b;
+  --chart-up: #22c55e;
+  --chart-down: #3b82f6;
 }
 
 .dark {
@@ -54,8 +54,8 @@
   --primary: #fafafa;
   --primary-fg: #09090b;
   --destructive: #ef4444;
-  --chart-up: #d4d4d8;
-  --chart-down: #fafafa;
+  --chart-up: #4ade80;
+  --chart-down: #60a5fa;
 }
 
 * {
