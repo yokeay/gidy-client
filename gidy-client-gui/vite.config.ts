@@ -8,6 +8,9 @@ export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
   clearScreen: false,
   base: "./",
+  build: {
+    modulePreload: { polyfill: false },
+  },
   server: {
     port: 1420,
     strictPort: true,
