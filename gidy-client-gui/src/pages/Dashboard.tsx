@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Play, Square, ArrowUp, ArrowDown, Activity, Server } from "lucide-react";
+import { ArrowUp, ArrowDown, Activity, Server, Zap } from "lucide-react";
 import {
   getStats,
   getStatus,
@@ -64,42 +64,92 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
-      {/* Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-foreground text-background p-7">
-        <div className="absolute right-6 top-1/2 -translate-y-1/2 opacity-10">
-          <Server size={140} strokeWidth={1.2} />
-        </div>
-        <div className="relative z-10 flex items-center justify-between gap-6">
-          <div className="min-w-0">
-            <p className="text-xs uppercase tracking-widest opacity-60 mb-1.5">
-              gidy client
-            </p>
-            <h2 className="text-3xl font-bold tabular">
-              {t("dashboard.version")} v0.2.7
-            </h2>
-            <p className="opacity-70 mt-2 text-sm">
-              {status.connected
+      {/* Connection Card */}
+      <div className="bg-card rounded-2xl border border-border p-8">
+        <div className="flex items-center gap-8">
+          {/* Big connect button */}
+          <div className="flex-shrink-0 flex flex-col items-center gap-3">
+            <button
+              onClick={handleToggle}
+              disabled={loading}
+              className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 disabled:opacity-50 ${
+                status.running
+                  ? "bg-foreground text-background shadow-[0_0_32px_rgba(0,0,0,0.25)] hover:opacity-90"
+                  : "bg-muted border-2 border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
+              }`}
+            >
+              {status.running && (
+                <span className="absolute inset-0 rounded-full animate-ping bg-foreground/20" />
+              )}
+              <Zap
+                size={32}
+                strokeWidth={1.75}
+                className={status.running ? "relative z-10" : ""}
+              />
+            </button>
+            <span className="text-xs font-medium text-muted-foreground">
+              {loading
+                ? t("common.loading")
+                : status.running
+                ? t("dashboard.stop")
+                : t("dashboard.start")}
+            </span>
+          </div>
+
+          {/* Status info */}
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="relative flex h-2.5 w-2.5">
+                {status.running && (
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-foreground opacity-30 animate-ping" />
+                )}
+                <span
+                  className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
+                    status.running ? "bg-foreground" : "bg-muted-foreground/40"
+                  }`}
+                />
+              </span>
+              <span className="text-xs uppercase tracking-widest text-muted-foreground">
+                gidy client · v0.2.7
+              </span>
+            </div>
+            <h2 className="text-3xl font-bold tabular mb-1">
+              {status.running
                 ? t("dashboard.connected")
                 : t("dashboard.disconnected")}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {status.running
+                ? `${t("dashboard.serviceUptime")}: ${formatUptime(stats.uptime_secs)}`
+                : t("dashboard.clickToConnect")}
             </p>
           </div>
-          <button
-            onClick={handleToggle}
-            disabled={loading}
-            className="shrink-0 flex items-center gap-2 px-6 py-3 rounded-xl bg-background/10 hover:bg-background/20 backdrop-blur transition-colors font-medium text-sm disabled:opacity-50"
-          >
-            {status.running ? (
-              <>
-                <Square size={15} fill="currentColor" />
-                {t("dashboard.stop")}
-              </>
-            ) : (
-              <>
-                <Play size={15} fill="currentColor" />
-                {t("dashboard.start")}
-              </>
-            )}
-          </button>
+
+          {/* Quick stats */}
+          <div className="flex-shrink-0 flex gap-6 text-right">
+            <div>
+              <div className="flex items-center gap-1.5 justify-end mb-1">
+                <ArrowUp size={12} className="text-muted-foreground" />
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {t("dashboard.uploadSpeed")}
+                </span>
+              </div>
+              <p className="text-xl font-semibold tabular">
+                {formatSpeed(stats.speed_up_kbps)}
+              </p>
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 justify-end mb-1">
+                <ArrowDown size={12} className="text-muted-foreground" />
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {t("dashboard.downloadSpeed")}
+                </span>
+              </div>
+              <p className="text-xl font-semibold tabular">
+                {formatSpeed(stats.speed_down_kbps)}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -109,7 +159,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Speed cards */}
+      {/* Traffic cards */}
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-card rounded-2xl border border-border p-6">
           <div className="flex items-center justify-between mb-3">
