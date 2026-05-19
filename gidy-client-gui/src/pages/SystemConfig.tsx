@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Shield, Network, Info } from "lucide-react";
 import {
   getConfig,
   updateConfig,
@@ -9,33 +8,135 @@ import {
   GuiConfig,
 } from "../api";
 
+function FieldGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      <div
+        style={{
+          fontSize: 12,
+          color: "var(--muted-fg)",
+          fontWeight: 500,
+          letterSpacing: "0.05em",
+        }}
+      >
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function FieldRow({
+  value,
+  type = "text",
+  onChange,
+  actionIcon,
+  onAction,
+  readOnly = false,
+  placeholder,
+}: {
+  value: string;
+  type?: string;
+  onChange?: (v: string) => void;
+  actionIcon?: string;
+  onAction?: () => void;
+  readOnly?: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        background: "var(--card)",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        overflow: "hidden",
+        transition: "border-color 0.15s",
+      }}
+      onMouseEnter={e =>
+        ((e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.12)")
+      }
+      onMouseLeave={e =>
+        ((e.currentTarget as HTMLElement).style.borderColor = "var(--border)")
+      }
+    >
+      <input
+        type={type}
+        value={value}
+        readOnly={readOnly}
+        placeholder={placeholder}
+        onChange={e => onChange?.(e.target.value)}
+        style={{
+          flex: 1,
+          background: "transparent",
+          border: "none",
+          outline: "none",
+          padding: "12px 14px",
+          fontFamily: "var(--font-mono)",
+          fontSize: 13,
+          color: "var(--fg)",
+          letterSpacing: type === "password" ? "0.15em" : "0.04em",
+        }}
+      />
+      {actionIcon && (
+        <button
+          onClick={onAction}
+          style={{
+            width: 44,
+            height: 44,
+            background: "transparent",
+            border: "none",
+            borderLeft: "1px solid var(--border)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--text-muted, #4a5268)",
+            fontSize: 15,
+            transition: "all 0.15s",
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)";
+            (e.currentTarget as HTMLElement).style.color = "var(--muted-fg)";
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.background = "transparent";
+            (e.currentTarget as HTMLElement).style.color = "var(--text-muted, #4a5268)";
+          }}
+        >
+          {actionIcon}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function SystemConfig() {
   const { t } = useTranslation();
   const [config, setConfig] = useState<GuiConfig | null>(null);
   const [saving, setSaving] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [message, setMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
+  const [showPsk, setShowPsk] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     getConfig().then(setConfig).catch(() => {});
-    const tick = async () => {
-      try {
-        const s = await getStatus();
-        setRunning(s.running);
-      } catch {}
+    const poll = async () => {
+      try { await getStatus(); } catch {}
     };
-    tick();
-    const id = setInterval(tick, 2000);
+    poll();
+    const id = setInterval(poll, 2000);
     return () => clearInterval(id);
   }, []);
 
-  const handleChange = (
-    key: keyof GuiConfig,
-    value: string | number | boolean,
-  ) => {
+  const handleChange = (key: keyof GuiConfig, value: string | number | boolean) => {
     if (!config) return;
     setConfig({ ...config, [key]: value });
     setMessage(null);
@@ -44,7 +145,7 @@ export default function SystemConfig() {
   const handleGeneratePsk = async () => {
     try {
       const psk = await generatePsk();
-      setConfig((prev) => (prev ? { ...prev, psk_hex: psk } : prev));
+      setConfig(prev => (prev ? { ...prev, psk_hex: psk } : prev));
     } catch {}
   };
 
@@ -60,223 +161,175 @@ export default function SystemConfig() {
     setSaving(false);
   };
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+  };
+
   if (!config) return null;
 
-  const inputClass =
-    "w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-foreground/40 transition-colors tabular";
-  const labelClass = "text-xs text-muted-foreground mb-1.5 block";
+  const serverDisplay = `${config.server_addr}:${config.server_port}`;
+  const localDisplay = `${config.socks5_addr}:${config.socks5_port}`;
 
   return (
-    <div className="space-y-5">
-      {/* Connection status badge */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">{t("systemConfig.title")}</h2>
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-card border border-border">
-          <span className="relative flex h-2 w-2">
-            {running && (
-              <span className="absolute inline-flex h-full w-full rounded-full bg-foreground opacity-40 animate-ping" />
-            )}
-            <span
-              className={`relative inline-flex rounded-full h-2 w-2 ${
-                running ? "bg-foreground" : "bg-muted-foreground/50"
-              }`}
-            />
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {running ? t("common.connected") : t("common.disconnected")}
-          </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        {/* Proxy Server */}
-        <div className="bg-card rounded-2xl border border-border p-6">
-          <div className="flex items-center gap-2 mb-5">
-            <Shield size={15} strokeWidth={1.75} className="text-muted-foreground" />
-            <h3 className="font-semibold text-sm">
-              {t("systemConfig.proxyServer")}
-            </h3>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className={labelClass}>
-                {t("systemConfig.serverAddr")}
-              </label>
-              <input
-                className={inputClass}
-                value={config.server_addr}
-                onChange={(e) => handleChange("server_addr", e.target.value)}
-                placeholder="127.0.0.1"
-              />
-            </div>
-            <div>
-              <label className={labelClass}>
-                {t("systemConfig.serverPort")}
-              </label>
-              <input
-                className={inputClass}
-                value={config.server_port}
-                onChange={(e) =>
-                  handleChange("server_port", parseInt(e.target.value) || 0)
-                }
-                placeholder="443"
-              />
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs text-muted-foreground">
-                  {t("systemConfig.psk")}
-                </label>
-                <button
-                  onClick={handleGeneratePsk}
-                  className="text-xs text-foreground hover:opacity-70 transition-opacity"
-                >
-                  {t("systemConfig.generatePsk")}
-                </button>
-              </div>
-              <input
-                className={inputClass}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 20,
+          width: "100%",
+          maxWidth: 640,
+        }}
+      >
+        {/* PSK */}
+        <FieldGroup label={t("systemConfig.psk")}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <FieldRow
                 value={config.psk_hex}
-                onChange={(e) => handleChange("psk_hex", e.target.value)}
-                placeholder={t("systemConfig.pskHint")}
+                type={showPsk ? "text" : "password"}
+                onChange={v => handleChange("psk_hex", v)}
+                actionIcon={showPsk ? "🙈" : "👁"}
+                onAction={() => setShowPsk(p => !p)}
               />
             </div>
-            <div>
-              <label className={labelClass}>{t("systemConfig.protocol")}</label>
-              <select
-                className={inputClass}
-                value={config.protocol}
-                onChange={(e) => handleChange("protocol", e.target.value)}
+            <button
+              onClick={handleGeneratePsk}
+              style={{
+                padding: "0 14px",
+                background: "var(--card)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                color: "var(--muted-fg)",
+                fontSize: 12,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                fontFamily: "var(--font-ui)",
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLElement).style.borderColor = "rgba(46,204,113,0.4)";
+                (e.currentTarget as HTMLElement).style.color = "var(--accent-green)";
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
+                (e.currentTarget as HTMLElement).style.color = "var(--muted-fg)";
+              }}
+            >
+              {t("systemConfig.generatePsk")}
+            </button>
+          </div>
+        </FieldGroup>
+
+        {/* Server address */}
+        <FieldGroup label={t("systemConfig.serverAddr")}>
+          <FieldRow
+            value={serverDisplay}
+            readOnly
+            actionIcon="⧉"
+            onAction={() => copyToClipboard(serverDisplay)}
+          />
+        </FieldGroup>
+
+        {/* Server Name (SN) */}
+        <FieldGroup label={`SN / ${t("systemConfig.serverAddr")}`}>
+          <FieldRow
+            value={config.server_name}
+            onChange={v => handleChange("server_name", v)}
+            actionIcon="⧉"
+            onAction={() => copyToClipboard(config.server_name)}
+          />
+        </FieldGroup>
+
+        {/* Local listen address */}
+        <FieldGroup label={t("systemConfig.socks5Addr")}>
+          <FieldRow
+            value={localDisplay}
+            readOnly
+            actionIcon="⧉"
+            onAction={() => copyToClipboard(localDisplay)}
+          />
+        </FieldGroup>
+
+        {/* HTTP proxy */}
+        <FieldGroup label={t("systemConfig.httpAddr")}>
+          <FieldRow
+            value={`${config.http_addr}:${config.http_port}`}
+            readOnly
+            actionIcon="⧉"
+            onAction={() => copyToClipboard(`${config.http_addr}:${config.http_port}`)}
+          />
+        </FieldGroup>
+
+        {/* Mode toggle */}
+        <FieldGroup label={t("systemConfig.mode")}>
+          <div style={{ display: "flex", gap: 8 }}>
+            {["global", "pac"].map(m => (
+              <button
+                key={m}
+                onClick={() => handleChange("mode", m)}
+                style={{
+                  flex: 1,
+                  padding: "10px 0",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  border: config.mode === m
+                    ? "1px solid rgba(46,204,113,0.5)"
+                    : "1px solid var(--border)",
+                  background: config.mode === m
+                    ? "linear-gradient(135deg, rgba(46,204,113,0.2), rgba(46,204,113,0.08))"
+                    : "var(--card)",
+                  color: config.mode === m ? "var(--accent-green)" : "var(--muted-fg)",
+                  transition: "all 0.15s",
+                  fontFamily: "var(--font-ui)",
+                }}
               >
-                <option value="gidy">gidy</option>
-              </select>
-            </div>
+                {m === "global" ? t("systemConfig.globalMode") : t("systemConfig.pacMode")}
+              </button>
+            ))}
           </div>
-        </div>
+        </FieldGroup>
 
-        {/* Local Proxy */}
-        <div className="bg-card rounded-2xl border border-border p-6">
-          <div className="flex items-center gap-2 mb-5">
-            <Network size={15} strokeWidth={1.75} className="text-muted-foreground" />
-            <h3 className="font-semibold text-sm">
-              {t("systemConfig.localProxy")}
-            </h3>
-          </div>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelClass}>
-                  {t("systemConfig.socks5Addr")}
-                </label>
-                <input
-                  className={inputClass}
-                  value={config.socks5_addr}
-                  onChange={(e) => handleChange("socks5_addr", e.target.value)}
-                  placeholder="127.0.0.1"
-                />
-              </div>
-              <div>
-                <label className={labelClass}>
-                  {t("systemConfig.socks5Port")}
-                </label>
-                <input
-                  className={inputClass}
-                  value={config.socks5_port}
-                  onChange={(e) =>
-                    handleChange("socks5_port", parseInt(e.target.value) || 0)
-                  }
-                  placeholder="1080"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelClass}>
-                  {t("systemConfig.httpAddr")}
-                </label>
-                <input
-                  className={inputClass}
-                  value={config.http_addr}
-                  onChange={(e) => handleChange("http_addr", e.target.value)}
-                  placeholder="127.0.0.1"
-                />
-              </div>
-              <div>
-                <label className={labelClass}>
-                  {t("systemConfig.httpPort")}
-                </label>
-                <input
-                  className={inputClass}
-                  value={config.http_port}
-                  onChange={(e) =>
-                    handleChange("http_port", parseInt(e.target.value) || 0)
-                  }
-                  placeholder="8080"
-                />
-              </div>
-            </div>
-            <div>
-              <label className={labelClass}>{t("systemConfig.mode")}</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => handleChange("mode", "global")}
-                  className={`py-2 rounded-lg text-xs font-medium border transition-colors ${
-                    config.mode === "global"
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "bg-muted border-border text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {t("systemConfig.globalMode")}
-                </button>
-                <button
-                  onClick={() => handleChange("mode", "pac")}
-                  className={`py-2 rounded-lg text-xs font-medium border transition-colors ${
-                    config.mode === "pac"
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "bg-muted border-border text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {t("systemConfig.pacMode")}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Connection Note */}
-      <div className="bg-card rounded-2xl border border-border p-6">
-        <div className="flex items-center gap-2 mb-2.5">
-          <Info size={14} strokeWidth={1.75} className="text-muted-foreground" />
-          <h3 className="font-semibold text-sm">
-            {t("systemConfig.connectionNote")}
-          </h3>
-        </div>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          {t("systemConfig.connectionNoteText")}
-        </p>
-      </div>
-
-      {/* Save button */}
-      <div className="flex items-center justify-end gap-4">
-        {message && (
-          <span
-            className={`text-xs ${
-              message.type === "success"
-                ? "text-muted-foreground"
-                : "text-destructive"
-            }`}
+        {/* Save */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 16, paddingTop: 4 }}>
+          {message && (
+            <span
+              style={{
+                fontSize: 12,
+                color: message.type === "success" ? "var(--accent-green)" : "#e74c3c",
+              }}
+            >
+              {message.text}
+            </span>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              padding: "9px 24px",
+              background: "var(--accent-green)",
+              color: "#000",
+              border: "none",
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+              boxShadow: "0 0 12px rgba(46,204,113,0.25)",
+              transition: "all 0.15s",
+              opacity: saving ? 0.5 : 1,
+              fontFamily: "var(--font-ui)",
+            }}
+            onMouseEnter={e => {
+              if (!saving) (e.currentTarget as HTMLElement).style.boxShadow = "0 0 20px rgba(46,204,113,0.4)";
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLElement).style.boxShadow = "0 0 12px rgba(46,204,113,0.25)";
+            }}
           >
-            {message.text}
-          </span>
-        )}
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-7 py-2.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-        >
-          {saving ? t("common.loading") : t("systemConfig.saveAndConnect")}
-        </button>
+            {saving ? t("common.loading") : t("systemConfig.saveAndConnect")}
+          </button>
+        </div>
       </div>
     </div>
   );

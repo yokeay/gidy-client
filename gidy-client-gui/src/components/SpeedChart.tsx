@@ -8,15 +8,12 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
-import { useTranslation } from "react-i18next";
 
 interface SpeedChartProps {
   data: { time: number; up: number; down: number }[];
 }
 
 export default function SpeedChart({ data }: SpeedChartProps) {
-  const { t } = useTranslation();
-
   const chartData = useMemo(() => {
     if (data.length === 0) {
       const now = Date.now();
@@ -31,20 +28,6 @@ export default function SpeedChart({ data }: SpeedChartProps) {
 
   return (
     <div className="w-full h-full flex flex-col">
-      <div className="flex items-center gap-5 mb-3">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="w-2.5 h-2.5 rounded-full bg-chart-down" />
-          <span className="text-muted-foreground">
-            {t("trafficMonitor.download")}
-          </span>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="w-2.5 h-2.5 rounded-full bg-chart-up opacity-70" />
-          <span className="text-muted-foreground">
-            {t("trafficMonitor.upload")}
-          </span>
-        </div>
-      </div>
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart

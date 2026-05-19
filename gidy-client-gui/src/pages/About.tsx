@@ -1,79 +1,92 @@
-import { Info, Shield, Code, ExternalLink } from "lucide-react";
-
-const APP_VERSION = "v0.2.7";
+const APP_VERSION = "v0.2.8";
 
 export default function About() {
   return (
-    <div className="space-y-5">
-      <div className="bg-card rounded-2xl border border-border p-7">
-        <div className="flex items-center gap-4 mb-6">
-          <img
-            src="/logo.png"
-            alt="gidy"
-            className="w-16 h-16 rounded-xl ring-1 ring-border"
-          />
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 680 }}>
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: "24px 28px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 10,
+              background: "var(--accent-green)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 24,
+              fontWeight: 700,
+              color: "#000",
+              boxShadow: "0 0 16px rgba(46,204,113,0.4)",
+            }}
+          >
+            G
+          </div>
           <div>
-            <h2 className="text-xl font-bold">gidy client</h2>
-            <p className="text-sm text-muted-foreground tabular mt-0.5">
+            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--fg)" }}>gidy-client</div>
+            <div style={{ fontSize: 12, color: "var(--muted-fg)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
               {APP_VERSION}
-            </p>
+            </div>
           </div>
         </div>
-
-        <div className="space-y-3.5 text-sm text-muted-foreground">
-          <div className="flex items-start gap-3">
-            <Shield
-              size={15}
-              strokeWidth={1.75}
-              className="text-foreground mt-0.5 shrink-0"
-            />
-            <span>
-              gidy protocol — QUIC-based secure proxy with protocol morphing
-            </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 13, color: "var(--muted-fg)" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <span style={{ color: "var(--accent-green)", flexShrink: 0 }}>⬡</span>
+            <span>gidy protocol — QUIC-based secure proxy with protocol morphing</span>
           </div>
-          <div className="flex items-start gap-3">
-            <Code
-              size={15}
-              strokeWidth={1.75}
-              className="text-foreground mt-0.5 shrink-0"
-            />
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <span style={{ color: "var(--accent-green)", flexShrink: 0 }}>⬡</span>
             <span>Built with Tauri + React + Rust</span>
           </div>
-          <div className="flex items-start gap-3">
-            <Info
-              size={15}
-              strokeWidth={1.75}
-              className="text-foreground mt-0.5 shrink-0"
-            />
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <span style={{ color: "var(--accent-green)", flexShrink: 0 }}>⬡</span>
             <span>Client for secure, obfuscated proxy tunneling</span>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-card rounded-2xl border border-border p-6">
-          <h3 className="text-sm font-semibold mb-2">License</h3>
-          <p className="text-xs text-muted-foreground">
-            Proprietary. All rights reserved.
-          </p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "20px 24px",
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--fg)", marginBottom: 8 }}>License</div>
+          <div style={{ fontSize: 12, color: "var(--muted-fg)" }}>Proprietary. All rights reserved.</div>
         </div>
         <a
           href="https://github.com/yokeay/gidy-client"
           target="_blank"
           rel="noreferrer"
-          className="bg-card rounded-2xl border border-border p-6 hover:bg-muted/40 transition-colors group"
+          style={{
+            background: "var(--card)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "20px 24px",
+            textDecoration: "none",
+            transition: "border-color 0.15s",
+            display: "block",
+          }}
+          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.borderColor = "rgba(59,158,255,0.4)")}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.borderColor = "var(--border)")}
         >
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold">Repository</h3>
-            <ExternalLink
-              size={13}
-              strokeWidth={1.75}
-              className="text-muted-foreground group-hover:text-foreground transition-colors"
-            />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--fg)" }}>Repository</div>
+            <span style={{ color: "var(--accent-blue)", fontSize: 14 }}>↗</span>
           </div>
-          <p className="text-xs text-muted-foreground tabular">
+          <div style={{ fontSize: 12, color: "var(--accent-blue)", fontFamily: "var(--font-mono)" }}>
             github.com/yokeay/gidy-client
-          </p>
+          </div>
         </a>
       </div>
     </div>

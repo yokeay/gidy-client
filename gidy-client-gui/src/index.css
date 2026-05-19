@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;600&display=swap');
 
 @theme inline {
   --color-background: var(--bg);
@@ -16,46 +17,43 @@
   --color-destructive: var(--destructive);
   --color-chart-up: var(--chart-up);
   --color-chart-down: var(--chart-down);
+  --color-accent-green: var(--accent-green);
+  --color-accent-blue: var(--accent-blue);
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-xl: 18px;
-  --font-mono: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", ui-monospace,
-    monospace;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', ui-monospace, monospace;
+  --font-ui: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 :root {
-  --bg: #fafafa;
-  --fg: #18181b;
-  --card: #ffffff;
-  --card-fg: #18181b;
-  --border: #e4e4e7;
-  --muted: #f4f4f5;
-  --muted-fg: #71717a;
-  --accent: #18181b;
-  --accent-fg: #fafafa;
-  --primary: #18181b;
-  --primary-fg: #fafafa;
-  --destructive: #ef4444;
-  --chart-up: #22c55e;
-  --chart-down: #3b82f6;
-}
-
-.dark {
-  --bg: #09090b;
-  --fg: #fafafa;
-  --card: #111113;
-  --card-fg: #fafafa;
-  --border: #27272a;
-  --muted: #1c1c1f;
-  --muted-fg: #a1a1aa;
-  --accent: #fafafa;
-  --accent-fg: #09090b;
-  --primary: #fafafa;
-  --primary-fg: #09090b;
-  --destructive: #ef4444;
-  --chart-up: #4ade80;
-  --chart-down: #60a5fa;
+  --bg: #0d0f12;
+  --bg-secondary: #13161c;
+  --bg-card-val: #1a1d25;
+  --bg-card-hover: #1f2330;
+  --bg-sidebar: #111318;
+  --fg: #e8eaf0;
+  --card: #1a1d25;
+  --card-fg: #e8eaf0;
+  --border: rgba(255,255,255,0.06);
+  --border-active: rgba(46,204,113,0.4);
+  --muted: #1f2330;
+  --muted-fg: #7a8299;
+  --accent: #2ecc71;
+  --accent-fg: #000000;
+  --primary: #2ecc71;
+  --primary-fg: #000000;
+  --destructive: #e74c3c;
+  --chart-up: #2ecc71;
+  --chart-down: #3b9eff;
+  --accent-green: #2ecc71;
+  --accent-green-dim: #1a7a42;
+  --accent-green-glow: rgba(46,204,113,0.3);
+  --accent-blue: #3b9eff;
+  --text-muted: #4a5268;
+  --titlebar-height: 52px;
+  --sidebar-width: 220px;
 }
 
 * {
@@ -71,12 +69,12 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--fg);
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
-  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
 }
 
@@ -85,18 +83,40 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Hide scrollbar but keep functionality */
-.scroll-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.font-mono {
+  font-family: var(--font-mono) !important;
 }
-.scroll-thin::-webkit-scrollbar-track {
-  background: transparent;
+
+/* Scrollbar */
+.scroll-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: var(--muted-fg); }
+
+/* Green pulse dot animation */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--accent-green); }
+  50% { opacity: 0.7; box-shadow: 0 0 16px var(--accent-green); }
 }
-.scroll-thin::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
+
+/* Power ring animation */
+@keyframes ring-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.02); }
 }
-.scroll-thin::-webkit-scrollbar-thumb:hover {
-  background: var(--muted-fg);
+
+.pulse-dot {
+  animation: pulse-dot 2s infinite;
+}
+
+.ring-pulse-1 { animation: ring-pulse 3s ease-in-out infinite; animation-delay: 0s; }
+.ring-pulse-2 { animation: ring-pulse 3s ease-in-out infinite; animation-delay: 0.5s; }
+.ring-pulse-3 { animation: ring-pulse 3s ease-in-out infinite; animation-delay: 1s; }
+
+/* Titlebar drag region */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
 }
