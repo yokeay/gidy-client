@@ -1,186 +1,303 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
 import SystemConfig from "./pages/SystemConfig";
 import TrafficMonitor from "./pages/TrafficMonitor";
 import UserSettings from "./pages/UserSettings";
-import About from "./pages/About";
+import LogViewer from "./pages/LogViewer";
 
-function Titlebar() {
+const APP_VERSION = "v0.2.9";
+
+// ── Close Confirm Dialog ──────────────────────────────────────────────────────
+function CloseDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999,
+        background: "rgba(0,0,0,0.6)", backdropFilter: "blur(6px)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+      onClick={onCancel}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "var(--bg-secondary,#13161c)",
+          border: "1px solid var(--border)",
+          borderRadius: 14,
+          padding: "28px 32px",
+          width: 340,
+          boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: 8,
+            background: "rgba(231,76,60,0.15)",
+            border: "1px solid rgba(231,76,60,0.3)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 16,
+          }}>⚡</div>
+          <span style={{ fontSize: 16, fontWeight: 600, color: "var(--fg)" }}>退出软件</span>
+        </div>
+        <p style={{ fontSize: 13, color: "var(--muted-fg)", lineHeight: 1.7, marginBottom: 24 }}>
+          是否彻底退出 Gidy-Client？<br />
+          选择"最小化"可保持后台运行并缩小到系统托盘。
+        </p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            onClick={onCancel}
+            style={{
+              flex: 1, padding: "9px 0", borderRadius: 8,
+              background: "var(--card)", border: "1px solid var(--border)",
+              color: "var(--muted-fg)", fontSize: 13, fontWeight: 500,
+              cursor: "pointer", fontFamily: "var(--font-ui)", transition: "all 0.15s",
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.15)";
+              (e.currentTarget as HTMLElement).style.color = "var(--fg)";
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
+              (e.currentTarget as HTMLElement).style.color = "var(--muted-fg)";
+            }}
+          >
+            最小化到托盘
+          </button>
+          <button
+            onClick={onConfirm}
+            style={{
+              flex: 1, padding: "9px 0", borderRadius: 8,
+              background: "#e74c3c", border: "none",
+              color: "#fff", fontSize: 13, fontWeight: 600,
+              cursor: "pointer", fontFamily: "var(--font-ui)",
+              boxShadow: "0 0 12px rgba(231,76,60,0.3)",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.boxShadow = "0 0 20px rgba(231,76,60,0.5)")}
+            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.boxShadow = "0 0 12px rgba(231,76,60,0.3)")}
+          >
+            退出软件
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Titlebar ──────────────────────────────────────────────────────────────────
+function Titlebar({ onClose }: { onClose: () => void }) {
   const appWindow = getCurrentWindow();
 
   return (
     <div
-      className="titlebar-drag flex items-center shrink-0 px-[18px] gap-[10px]"
+      className="titlebar-drag"
       style={{
         height: "var(--titlebar-height)",
-        background: "var(--bg-secondary, #13161c)",
+        background: "var(--bg-secondary,#13161c)",
         borderBottom: "1px solid var(--border)",
+        display: "flex",
+        alignItems: "center",
+        padding: "0 16px",
+        gap: 10,
+        flexShrink: 0,
       }}
     >
-      <div
-        className="titlebar-no-drag flex items-center justify-center shrink-0 rounded-[6px] font-bold text-black"
-        style={{
-          width: 28, height: 28,
-          fontSize: 15,
-          background: "var(--accent-green)",
-          boxShadow: "0 0 12px rgba(46,204,113,0.4)",
-          letterSpacing: "-1px",
-        }}
-      >
-        G
+      {/* Logo + title */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div
+          className="titlebar-no-drag"
+          style={{
+            width: 26, height: 26, borderRadius: 6,
+            background: "var(--accent-green)",
+            boxShadow: "0 0 10px rgba(46,204,113,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 13, fontWeight: 700, color: "#000",
+            letterSpacing: "-0.5px", flexShrink: 0,
+          }}
+        >
+          G
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600,
+            color: "var(--fg)", letterSpacing: "0.02em",
+          }}>
+            Gidy-Client
+          </span>
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: 10,
+            color: "var(--muted-fg)", letterSpacing: "0.04em",
+          }}>
+            {APP_VERSION}
+          </span>
+        </div>
       </div>
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 13,
-          fontWeight: 500,
-          color: "var(--fg)",
-          letterSpacing: "0.02em",
-        }}
-      >
-        gidy-client
-      </span>
 
-      <div className="titlebar-no-drag ml-auto flex gap-1">
-        {[
-          { label: "─", action: () => appWindow.minimize(), danger: false },
-          { label: "□", action: () => appWindow.toggleMaximize(), danger: false },
-          { label: "✕", action: () => appWindow.close(), danger: true },
-        ].map(btn => (
-          <button
-            key={btn.label}
-            onClick={btn.action}
-            style={{
-              width: 32, height: 32,
-              borderRadius: 6,
-              border: "none",
-              background: "transparent",
-              color: "var(--muted-fg)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 14,
-              transition: "background 0.15s, color 0.15s",
-            }}
-            onMouseEnter={e => {
-              if (btn.danger) {
-                (e.currentTarget as HTMLElement).style.background = "#e74c3c";
-                (e.currentTarget as HTMLElement).style.color = "#fff";
-              } else {
-                (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
-                (e.currentTarget as HTMLElement).style.color = "var(--fg)";
-              }
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.background = "transparent";
-              (e.currentTarget as HTMLElement).style.color = "var(--muted-fg)";
-            }}
-          >
-            {btn.label}
-          </button>
-        ))}
+      {/* Window controls — right side, only minimize + close */}
+      <div className="titlebar-no-drag" style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+        <button
+          onClick={() => appWindow.minimize()}
+          title="最小化"
+          style={{
+            width: 32, height: 28, borderRadius: 6,
+            border: "none", background: "transparent",
+            color: "var(--muted-fg)", cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 12, transition: "background 0.15s, color 0.15s",
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.08)";
+            (e.currentTarget as HTMLElement).style.color = "var(--fg)";
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.background = "transparent";
+            (e.currentTarget as HTMLElement).style.color = "var(--muted-fg)";
+          }}
+        >
+          ─
+        </button>
+        <button
+          onClick={onClose}
+          title="关闭"
+          style={{
+            width: 32, height: 28, borderRadius: 6,
+            border: "none", background: "transparent",
+            color: "var(--muted-fg)", cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 12, transition: "background 0.15s, color 0.15s",
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.background = "#e74c3c";
+            (e.currentTarget as HTMLElement).style.color = "#fff";
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.background = "transparent";
+            (e.currentTarget as HTMLElement).style.color = "var(--muted-fg)";
+          }}
+        >
+          ✕
+        </button>
       </div>
     </div>
   );
 }
 
+// ── Page title ────────────────────────────────────────────────────────────────
 function PageTitle({ title }: { title: string }) {
   return (
     <div style={{ marginBottom: 28 }}>
-      <div style={{ fontSize: 22, fontWeight: 600, color: "var(--fg)", marginBottom: 6, letterSpacing: "-0.02em" }}>
+      <div style={{ fontSize: 20, fontWeight: 600, color: "var(--fg)", marginBottom: 6, letterSpacing: "-0.02em" }}>
         {title}
       </div>
-      <div
-        style={{
-          width: 28, height: 2.5,
-          background: "var(--accent-green)",
-          borderRadius: 2,
-          boxShadow: "0 0 8px var(--accent-green)",
-        }}
-      />
+      <div style={{
+        width: 24, height: 2.5, background: "var(--accent-green)",
+        borderRadius: 2, boxShadow: "0 0 8px var(--accent-green)",
+      }} />
     </div>
   );
 }
 
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const { t, i18n } = useTranslation();
-  const [theme] = useState<"dark">("dark");
+  const { i18n } = useTranslation();
   const location = useLocation();
+  const [showCloseDialog, setShowCloseDialog] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
   }, []);
 
-  const toggleLang = () => {
-    i18n.changeLanguage(i18n.language === "zh" ? "en" : "zh");
-  };
+  // Listen for tray quit event from Rust
+  useEffect(() => {
+    const unlisten = listen("tray-quit", () => {
+      setShowCloseDialog(true);
+    });
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
+
+  const handleClose = useCallback(() => {
+    setShowCloseDialog(true);
+  }, []);
+
+  const handleConfirmQuit = useCallback(async () => {
+    setShowCloseDialog(false);
+    const appWindow = getCurrentWindow();
+    await appWindow.close();
+  }, []);
+
+  const handleMinimizeToTray = useCallback(async () => {
+    setShowCloseDialog(false);
+    const appWindow = getCurrentWindow();
+    await appWindow.hide();
+  }, []);
 
   const getPageTitle = () => {
     const p = location.pathname;
-    if (p === "/" || p === "/dashboard") return t("nav.systemConfig");
-    if (p === "/system-config") return t("nav.systemConfig");
-    if (p === "/traffic-monitor") return t("nav.trafficMonitor");
-    if (p === "/user-settings") return t("nav.userSettings");
-    if (p === "/about") return t("nav.about");
+    if (p === "/" || p === "/dashboard") return "系统配置";
+    if (p === "/traffic-monitor") return "流量监测";
+    if (p === "/logs") return "系统日志";
+    if (p === "/user-settings") return "设置";
     return "";
   };
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        width: "100vw",
-        overflow: "hidden",
-        background: "var(--bg)",
-      }}
-    >
-      <Titlebar />
+    <div style={{
+      display: "flex", flexDirection: "column",
+      height: "100vh", width: "100vw",
+      overflow: "hidden", background: "var(--bg)",
+    }}>
+      <Titlebar onClose={handleClose} />
+
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <Sidebar
-          theme={theme}
-          onToggleTheme={() => {}}
-          onToggleLang={toggleLang}
-          themeColor="green"
-          currentLang={i18n.language as "zh" | "en"}
           currentPath={location.pathname}
+          currentLang={i18n.language as "zh" | "en"}
         />
         <main
           className="scroll-thin"
           style={{
-            flex: 1,
-            overflowY: "auto",
-            padding: "32px 36px",
+            flex: 1, overflowY: "auto",
+            padding: "28px 32px",
             background: "var(--bg)",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
           <PageTitle title={getPageTitle()} />
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/system-config" element={<SystemConfig />} />
-            <Route path="/traffic-monitor" element={<TrafficMonitor />} />
-            <Route
-              path="/user-settings"
-              element={
-                <UserSettings
-                  theme={theme}
-                  themeColor="green"
-                  onThemeChange={() => {}}
-                  onThemeColorChange={() => {}}
-                />
-              }
-            />
-            <Route path="/about" element={<About />} />
-          </Routes>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/system-config" element={<SystemConfig />} />
+              <Route path="/traffic-monitor" element={<TrafficMonitor />} />
+              <Route path="/logs" element={<LogViewer />} />
+              <Route
+                path="/user-settings"
+                element={
+                  <UserSettings
+                    theme="dark"
+                    themeColor="green"
+                    onThemeChange={() => {}}
+                    onThemeColorChange={() => {}}
+                  />
+                }
+              />
+            </Routes>
+          </div>
         </main>
       </div>
+
+      {showCloseDialog && (
+        <CloseDialog
+          onConfirm={handleConfirmQuit}
+          onCancel={handleMinimizeToTray}
+        />
+      )}
     </div>
   );
 }
