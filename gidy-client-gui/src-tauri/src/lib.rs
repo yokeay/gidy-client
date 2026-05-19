@@ -7,7 +7,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Emitter, Manager,
 };
 
 pub struct AppState {
@@ -45,7 +45,7 @@ pub fn run() {
             commands::generate_psk,
         ])
         .setup(|app| {
-            let handle = app.handle().clone();
+            let _handle = app.handle().clone();
 
             // Build tray menu
             let show_item = MenuItem::with_id(app, "show", "回主界面", true, None::<&str>)?;
