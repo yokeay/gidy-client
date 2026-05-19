@@ -40,6 +40,15 @@ jobs:
         run: npm run build
         working-directory: gidy-client-gui
 
+      - name: Verify & fix index.html asset paths (must be relative)
+        run: |
+          echo "=== dist/index.html content ==="
+          cat gidy-client-gui/dist/index.html
+          # Force relative paths: replace href="/assets/ and src="/assets/ with ./ variants
+          sed -i 's|href="/|href="./|g; s|src="/|src="./|g' gidy-client-gui/dist/index.html
+          echo "=== after fix ==="
+          cat gidy-client-gui/dist/index.html
+
       - name: Build GUI (Tauri bundle – AppImage + deb)
         run: npx tauri build --bundles appimage,deb
         working-directory: gidy-client-gui
@@ -107,6 +116,16 @@ jobs:
       - name: Build frontend
         run: npm run build
         working-directory: gidy-client-gui
+
+      - name: Verify & fix index.html asset paths (must be relative)
+        shell: bash
+        run: |
+          echo "=== dist/index.html content ==="
+          cat gidy-client-gui/dist/index.html
+          # Force relative paths: replace href="/assets/ and src="/assets/ with ./ variants
+          sed -i 's|href="/|href="./|g; s|src="/|src="./|g' gidy-client-gui/dist/index.html
+          echo "=== after fix ==="
+          cat gidy-client-gui/dist/index.html
 
       - name: Build GUI (Tauri bundle – NSIS + MSI)
         run: npx tauri build --bundles nsis,msi
