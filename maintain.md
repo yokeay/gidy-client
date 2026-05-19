@@ -1,3 +1,31 @@
+## v0.2.9 - 2026-05-19 · 桌面端 UI 1:1 复刻（绿色主题）
+
+### 变更内容
+- 全面重构 gidy-client-gui 桌面端 UI，按 gidy-client-ui 设计稿 1:1 复刻
+  - 主题色系：深黑 #0d0f12 + 绿色强调色 #2ecc71（替换原白/黑主色）
+  - 字体：JetBrains Mono（数字/代码）+ Noto Sans SC（UI文字）
+  - 自定义 Titlebar：G徽章 + gidy-client + 最小化/最大化/关闭，去掉 Windows 原生装饰（decorations: false）
+  - Sidebar 重构：绿色 active 态、底部连接状态指示器（脉冲绿点 + 运行时长）
+  - Dashboard（系统配置主页）：圆形电源按钮 + 三层脉冲环 + 3列速率卡片
+  - SystemConfig 页：field-row 样式（复制按钮、可见/隐藏 PSK、模式切换）
+  - TrafficMonitor 页：5列统计卡（绿↑蓝↓）+ 渐变折线图 + 连接详情表格
+  - UserSettings 页：①②③④绿框编号卡片样式
+  - About 页：G 徽章大图 + 项目信息卡片
+  - 页面顶部标题 + 绿色下划线装饰
+- tauri.conf.json：decorations 改为 false
+
+### 影响范围
+- gidy-client-gui/src/index.css（全量重写）
+- gidy-client-gui/src/App.tsx（Titlebar + PageTitle + 路由）
+- gidy-client-gui/src/components/Sidebar.tsx（全量重构）
+- gidy-client-gui/src/components/SpeedChart.tsx（移除重复 legend）
+- gidy-client-gui/src/pages/Dashboard.tsx（电源按钮居中）
+- gidy-client-gui/src/pages/SystemConfig.tsx（字段卡片样式）
+- gidy-client-gui/src/pages/TrafficMonitor.tsx（5列 + 图表 + 表格）
+- gidy-client-gui/src/pages/UserSettings.tsx（编号卡片）
+- gidy-client-gui/src/pages/About.tsx（重构）
+- gidy-client-gui/src-tauri/tauri.conf.json（decorations: false）
+
 ## v0.2.7 - 2026-05-16 · Android Stage 1（入库 + CI）
 
 ### 变更内容

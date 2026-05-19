@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Sun, Moon } from "lucide-react";
 import { getConfig, updateConfig, GuiConfig } from "../api";
 
 interface UserSettingsProps {
@@ -10,30 +9,149 @@ interface UserSettingsProps {
   onThemeColorChange: (c: string) => void;
 }
 
-const APP_VERSION = "v0.2.7";
+const APP_VERSION = "v0.2.8";
 
-const COLOR_OPTIONS = [
-  { value: "blue", class: "bg-blue-500" },
-  { value: "emerald", class: "bg-emerald-500" },
-  { value: "purple", class: "bg-purple-500" },
-  { value: "orange", class: "bg-orange-500" },
-  { value: "rose", class: "bg-rose-500" },
-];
+function SettingsItem({
+  num,
+  title,
+  sub,
+  right,
+}: {
+  num: string;
+  title: string;
+  sub?: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--card)",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        padding: "20px 24px",
+        display: "flex",
+        alignItems: "center",
+        gap: 18,
+        transition: "border-color 0.15s",
+      }}
+      onMouseEnter={e =>
+        ((e.currentTarget as HTMLElement).style.borderColor = "rgba(255,255,255,0.1)")
+      }
+      onMouseLeave={e =>
+        ((e.currentTarget as HTMLElement).style.borderColor = "var(--border)")
+      }
+    >
+      {/* Number badge */}
+      <div
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: "50%",
+          border: "1.5px solid var(--accent-green)",
+          color: "var(--accent-green)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 13,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          fontWeight: 600,
+        }}
+      >
+        {num}
+      </div>
+      {/* Info */}
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 500, color: "var(--fg)", marginBottom: sub ? 3 : 0 }}>
+          {title}
+        </div>
+        {sub && (
+          <div style={{ fontSize: 12, color: "var(--text-muted, #4a5268)", fontFamily: "var(--font-mono)" }}>
+            {sub}
+          </div>
+        )}
+      </div>
+      {/* Right action */}
+      {right}
+    </div>
+  );
+}
 
-export default function UserSettings({
-  theme,
-  themeColor,
-  onThemeChange,
-  onThemeColorChange,
-}: UserSettingsProps) {
+function GreenBtn({ onClick, children }: { onClick?: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: "var(--accent-green)",
+        color: "#000",
+        border: "none",
+        borderRadius: 8,
+        padding: "9px 18px",
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        boxShadow: "0 0 12px rgba(46,204,113,0.25)",
+        transition: "all 0.15s",
+        flexShrink: 0,
+        fontFamily: "var(--font-ui)",
+      }}
+      onMouseEnter={e =>
+        ((e.currentTarget as HTMLElement).style.boxShadow = "0 0 20px rgba(46,204,113,0.4)")
+      }
+      onMouseLeave={e =>
+        ((e.currentTarget as HTMLElement).style.boxShadow = "0 0 12px rgba(46,204,113,0.25)")
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+function ToggleSwitch({ value, onChange }: { value: boolean; onChange: () => void }) {
+  return (
+    <button
+      onClick={onChange}
+      style={{
+        position: "relative",
+        width: 48,
+        height: 24,
+        borderRadius: 12,
+        background: value ? "var(--accent-green)" : "rgba(255,255,255,0.12)",
+        border: "none",
+        cursor: "pointer",
+        transition: "background 0.2s",
+        flexShrink: 0,
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          top: 2,
+          left: value ? 26 : 2,
+          width: 20,
+          height: 20,
+          borderRadius: "50%",
+          background: "#fff",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+          transition: "left 0.2s",
+          display: "block",
+        }}
+      />
+    </button>
+  );
+}
+
+export default function UserSettings({ theme, themeColor, onThemeChange, onThemeColorChange }: UserSettingsProps) {
   const { t, i18n } = useTranslation();
   const [config, setConfig] = useState<GuiConfig | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [kernelPath, setKernelPath] = useState("/usr/local/bin/gidy-core");
 
   useEffect(() => {
     getConfig()
-      .then((c) => {
+      .then(c => {
         setConfig(c);
         onThemeChange(c.theme as "light" | "dark");
         onThemeColorChange(c.theme_color);
@@ -63,185 +181,167 @@ export default function UserSettings({
 
   if (!config) return null;
 
-  const toggleClass = (v: boolean) =>
-    `relative w-12 h-6 rounded-full transition-colors ${v ? "bg-foreground" : "bg-muted-foreground/30"}`;
-  const knobClass = (v: boolean) =>
-    `absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-card shadow-sm transition-transform ${v ? "translate-x-6" : "translate-x-0"}`;
-
   return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-4">
-        {/* Basic Settings */}
-        <div className="bg-card rounded-2xl border border-border p-6">
-          <h3 className="text-sm font-semibold mb-5">
-            {t("userSettings.basicSettings")}
-          </h3>
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">{t("userSettings.autoStart")}</span>
-              <button
-                onClick={() => handleToggle("auto_start")}
-                className={toggleClass(config.auto_start)}
-              >
-                <span className={knobClass(config.auto_start)} />
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">{t("userSettings.autoConnect")}</span>
-              <button
-                onClick={() => handleToggle("auto_connect")}
-                className={toggleClass(config.auto_connect)}
-              >
-                <span className={knobClass(config.auto_connect)} />
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">
-                {t("userSettings.minimizeToTray")}
-              </span>
-              <button
-                onClick={() => handleToggle("minimize_to_tray")}
-                className={toggleClass(config.minimize_to_tray)}
-              >
-                <span className={knobClass(config.minimize_to_tray)} />
-              </button>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">{t("userSettings.logRetention")}</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  className="w-16 bg-muted border border-border rounded-lg px-2 py-1 text-xs text-center tabular focus:outline-none focus:border-foreground/40"
-                  value={config.log_retention_days}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      log_retention_days: parseInt(e.target.value) || 7,
-                    })
-                  }
-                />
-                <span className="text-xs text-muted-foreground">
-                  {t("userSettings.days")}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 680, width: "100%" }}>
 
-        {/* Appearance */}
-        <div className="bg-card rounded-2xl border border-border p-6">
-          <h3 className="text-sm font-semibold mb-5">
-            {t("userSettings.themeMode")}
-          </h3>
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">{t("userSettings.themeMode")}</span>
-              <div className="flex gap-1 bg-muted rounded-lg p-0.5">
-                <button
-                  onClick={() => onThemeChange("light")}
-                  className={`flex items-center gap-1 px-3 py-1 rounded-md text-xs transition-colors ${
-                    theme === "light"
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  <Sun size={12} strokeWidth={1.75} />
-                  {t("userSettings.light")}
-                </button>
-                <button
-                  onClick={() => onThemeChange("dark")}
-                  className={`flex items-center gap-1 px-3 py-1 rounded-md text-xs transition-colors ${
-                    theme === "dark"
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  <Moon size={12} strokeWidth={1.75} />
-                  {t("userSettings.dark")}
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">{t("userSettings.themeColor")}</span>
-              <div className="flex gap-2">
-                {COLOR_OPTIONS.map((c) => (
-                  <button
-                    key={c.value}
-                    onClick={() => onThemeColorChange(c.value)}
-                    className={`w-5 h-5 rounded-full ${c.class} transition-transform ${
-                      themeColor === c.value
-                        ? "ring-2 ring-offset-2 ring-offset-card ring-foreground scale-110"
-                        : ""
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Language</span>
-              <div className="flex gap-1 bg-muted rounded-lg p-0.5">
-                <button
-                  onClick={() => i18n.changeLanguage("zh")}
-                  className={`px-3 py-1 rounded-md text-xs transition-colors ${
-                    i18n.language === "zh"
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  中文
-                </button>
-                <button
-                  onClick={() => i18n.changeLanguage("en")}
-                  className={`px-3 py-1 rounded-md text-xs transition-colors ${
-                    i18n.language === "en"
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  English
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* ① Version check */}
+      <SettingsItem
+        num="①"
+        title={t("userSettings.updateCheck")}
+        sub={`${t("userSettings.currentVersion")}：${APP_VERSION}`}
+        right={<GreenBtn onClick={() => {}}>{t("userSettings.checkUpdate")}</GreenBtn>}
+      />
 
-      {/* Version */}
-      <div className="bg-card rounded-2xl border border-border p-6">
-        <h3 className="text-sm font-semibold mb-4">
-          {t("userSettings.updateCheck")}
-        </h3>
-        <div className="space-y-3">
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">
-              {t("userSettings.currentVersion")}
-            </span>
-            <span className="tabular">{APP_VERSION}</span>
+      {/* ② Kernel path */}
+      <SettingsItem
+        num="②"
+        title={t("userSettings.basicSettings")}
+        sub={
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 0, background: "var(--bg-secondary, #13161c)", border: "1px solid var(--border)", borderRadius: 7, overflow: "hidden", width: "100%", maxWidth: 400 }}>
+            <input
+              type="text"
+              value={kernelPath}
+              onChange={e => setKernelPath(e.target.value)}
+              style={{
+                flex: 1,
+                padding: "9px 14px",
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                color: "var(--muted-fg)",
+                background: "transparent",
+                border: "none",
+                outline: "none",
+              }}
+            />
+            <button
+              style={{
+                padding: "9px 14px",
+                background: "transparent",
+                border: "none",
+                borderLeft: "1px solid var(--border)",
+                color: "var(--muted-fg)",
+                fontSize: 12,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                fontFamily: "var(--font-ui)",
+              }}
+            >
+              浏览
+            </button>
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">
-              {t("userSettings.latestVersion")}
-            </span>
-            <span className="tabular">{APP_VERSION}</span>
+        }
+      />
+
+      {/* ③ Auto start + Auto connect + Minimize to tray */}
+      <SettingsItem
+        num="③"
+        title={t("userSettings.autoStart")}
+        sub={t("userSettings.autoConnect")}
+        right={
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 12, color: "var(--muted-fg)" }}>{t("userSettings.autoStart")}</span>
+              <ToggleSwitch value={config.auto_start} onChange={() => handleToggle("auto_start")} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 12, color: "var(--muted-fg)" }}>{t("userSettings.autoConnect")}</span>
+              <ToggleSwitch value={config.auto_connect} onChange={() => handleToggle("auto_connect")} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 12, color: "var(--muted-fg)" }}>{t("userSettings.minimizeToTray")}</span>
+              <ToggleSwitch value={config.minimize_to_tray} onChange={() => handleToggle("minimize_to_tray")} />
+            </div>
           </div>
-          <button className="w-full py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
-            {t("userSettings.checkUpdate")}
-          </button>
+        }
+      />
+
+      {/* ④ Language + About */}
+      <SettingsItem
+        num="④"
+        title="Language / 语言"
+        sub={
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            {["zh", "en"].map(lang => (
+              <button
+                key={lang}
+                onClick={() => i18n.changeLanguage(lang)}
+                style={{
+                  padding: "6px 16px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  border: i18n.language === lang
+                    ? "1px solid rgba(46,204,113,0.5)"
+                    : "1px solid var(--border)",
+                  background: i18n.language === lang
+                    ? "rgba(46,204,113,0.15)"
+                    : "transparent",
+                  color: i18n.language === lang ? "var(--accent-green)" : "var(--muted-fg)",
+                  fontFamily: "var(--font-ui)",
+                  transition: "all 0.15s",
+                }}
+              >
+                {lang === "zh" ? "中文" : "English"}
+              </button>
+            ))}
+          </div>
+        }
+        right={
+          <a
+            href="https://github.com/yokeay/gidy-client"
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontSize: 13, color: "var(--accent-blue)", textDecoration: "none" }}
+          >
+            github.com/yokeay/gidy-client ↗
+          </a>
+        }
+      />
+
+      {/* Log retention */}
+      <div
+        style={{
+          background: "var(--card)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: "16px 24px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 18,
+        }}
+      >
+        <span style={{ fontSize: 14, color: "var(--fg)" }}>{t("userSettings.logRetention")}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            value={config.log_retention_days}
+            onChange={e => setConfig({ ...config, log_retention_days: parseInt(e.target.value) || 7 })}
+            style={{
+              width: 64,
+              background: "var(--muted)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "6px 8px",
+              fontSize: 13,
+              color: "var(--fg)",
+              textAlign: "center",
+              fontFamily: "var(--font-mono)",
+              outline: "none",
+            }}
+          />
+          <span style={{ fontSize: 12, color: "var(--muted-fg)" }}>{t("userSettings.days")}</span>
         </div>
       </div>
 
       {/* Save */}
-      <div className="flex items-center justify-end gap-4">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 16 }}>
         {message && (
-          <span className="text-xs text-muted-foreground">{message}</span>
+          <span style={{ fontSize: 12, color: "var(--accent-green)" }}>{message}</span>
         )}
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-7 py-2.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-        >
+        <GreenBtn onClick={handleSave}>
           {saving ? t("common.loading") : t("userSettings.saveConfig")}
-        </button>
+        </GreenBtn>
       </div>
     </div>
   );

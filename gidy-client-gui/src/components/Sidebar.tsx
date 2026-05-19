@@ -1,16 +1,6 @@
-import { useNavigate, useLocation } from "react-router-dom";
-import { useTranslation } from "react-i18next";
-import {
-  LayoutDashboard,
-  Settings,
-  Activity,
-  UserCog,
-  Info,
-  Moon,
-  Sun,
-  Languages,
-} from "lucide-react";
-import clsx from "clsx";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { getStatus, getStats, formatUptime } from "../api";
 
 interface SidebarProps {
   theme: "light" | "dark";
@@ -18,96 +8,159 @@ interface SidebarProps {
   onToggleLang: () => void;
   themeColor: string;
   currentLang: "zh" | "en";
+  currentPath: string;
 }
 
-const navItems = [
-  { path: "/dashboard", icon: LayoutDashboard, key: "nav.dashboard" },
-  { path: "/system-config", icon: Settings, key: "nav.systemConfig" },
-  { path: "/traffic-monitor", icon: Activity, key: "nav.trafficMonitor" },
-  { path: "/user-settings", icon: UserCog, key: "nav.userSettings" },
-  { path: "/about", icon: Info, key: "nav.about" },
+const navTop = [
+  { path: "/dashboard", icon: "⚙", labelZh: "系统配置", labelEn: "Config" },
+  { path: "/traffic-monitor", icon: "⌥", labelZh: "流量监测", labelEn: "Traffic" },
 ];
 
-export default function Sidebar({
-  theme,
-  onToggleTheme,
-  onToggleLang,
-  currentLang,
-}: SidebarProps) {
+const navBottom = [
+  { path: "/about", icon: "☰", labelZh: "日志", labelEn: "Logs" },
+  { path: "/user-settings", icon: "⚙", labelZh: "设置", labelEn: "Settings" },
+];
+
+export default function Sidebar({ onToggleLang, currentLang, currentPath }: SidebarProps) {
   const navigate = useNavigate();
-  const location = useLocation();
-  const { t } = useTranslation();
+  const [running, setRunning] = useState(false);
+  const [uptime, setUptime] = useState(0);
+
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const [st, stats] = await Promise.all([getStatus(), getStats()]);
+        setRunning(st.running);
+        setUptime(stats.uptime_secs);
+      } catch {}
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => clearInterval(id);
+  }, []);
 
   const isActive = (path: string) => {
     if (path === "/dashboard") {
-      return location.pathname === "/" || location.pathname === "/dashboard";
+      return currentPath === "/" || currentPath === "/dashboard";
     }
-    return location.pathname === path;
+    return currentPath === path;
+  };
+
+  const NavItem = ({ path, icon, labelZh, labelEn }: { path: string; icon: string; labelZh: string; labelEn: string }) => {
+    const active = isActive(path);
+    const label = currentLang === "zh" ? labelZh : labelEn;
+    return (
+      <div
+        onClick={() => navigate(path)}
+        className="flex items-center gap-[10px] rounded-[8px] cursor-pointer mb-[2px]"
+        style={{
+          padding: "10px 12px",
+          fontSize: 14,
+          fontWeight: active ? 500 : 400,
+          color: active ? "var(--accent-green)" : "var(--muted-fg)",
+          background: active
+            ? "linear-gradient(135deg, rgba(46,204,113,0.2), rgba(46,204,113,0.08))"
+            : "transparent",
+          border: active ? "1px solid rgba(46,204,113,0.25)" : "1px solid transparent",
+          transition: "all 0.15s",
+          userSelect: "none",
+        }}
+        onMouseEnter={e => {
+          if (!active) {
+            (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)";
+            (e.currentTarget as HTMLElement).style.color = "var(--fg)";
+          }
+        }}
+        onMouseLeave={e => {
+          if (!active) {
+            (e.currentTarget as HTMLElement).style.background = "transparent";
+            (e.currentTarget as HTMLElement).style.color = "var(--muted-fg)";
+          }
+        }}
+      >
+        <span style={{ fontSize: 16 }}>{icon}</span>
+        <span>{label}</span>
+      </div>
+    );
   };
 
   return (
-    <aside className="w-56 shrink-0 flex flex-col border-r border-border bg-card">
-      {/* Brand */}
-      <div className="h-20 flex items-center gap-3 px-5 border-b border-border">
-        <img
-          src="/logo.png"
-          alt="gidy"
-          className="w-10 h-10 rounded-xl ring-1 ring-border"
-        />
-        <div className="flex flex-col leading-tight">
-          <span className="font-semibold text-sm tracking-wide">gidy client</span>
-          <span className="text-[10px] text-muted-foreground mt-0.5">
-            secure proxy tunnel
-          </span>
-        </div>
+    <aside
+      className="flex flex-col shrink-0"
+      style={{
+        width: "var(--sidebar-width)",
+        background: "var(--bg-sidebar)",
+        borderRight: "1px solid var(--border)",
+        padding: "16px 10px",
+      }}
+    >
+      {/* Top nav */}
+      <div>
+        {navTop.map(item => <NavItem key={item.path} {...item} />)}
       </div>
 
-      {/* Nav items */}
-      <nav className="flex-1 py-4 px-3 space-y-0.5">
-        {navItems.map(({ path, icon: Icon, key }) => {
-          const active = isActive(path);
-          return (
-            <button
-              key={path}
-              onClick={() => navigate(path)}
-              className={clsx(
-                "relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
-                active
-                  ? "bg-muted text-foreground font-medium"
-                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-              )}
-            >
-              <span
-                className={clsx(
-                  "absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-r-full bg-foreground transition-opacity",
-                  active ? "opacity-100" : "opacity-0"
-                )}
-              />
-              <Icon size={17} strokeWidth={1.75} />
-              <span>{t(key)}</span>
-            </button>
-          );
-        })}
-      </nav>
+      {/* Bottom section */}
+      <div
+        className="mt-auto"
+        style={{ paddingTop: 12, borderTop: "1px solid var(--border)" }}
+      >
+        {navBottom.map(item => <NavItem key={item.path} {...item} />)}
 
-      {/* Bottom controls */}
-      <div className="p-3 border-t border-border space-y-0.5">
-        <button
-          onClick={onToggleTheme}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-        >
-          {theme === "dark" ? <Sun size={17} strokeWidth={1.75} /> : <Moon size={17} strokeWidth={1.75} />}
-          <span>
-            {theme === "dark" ? t("userSettings.light") : t("userSettings.dark")}
-          </span>
-        </button>
-        <button
+        {/* Lang toggle */}
+        <div
           onClick={onToggleLang}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="flex items-center gap-[10px] rounded-[8px] cursor-pointer mb-[2px]"
+          style={{
+            padding: "10px 12px",
+            fontSize: 14,
+            color: "var(--muted-fg)",
+            transition: "all 0.15s",
+            userSelect: "none",
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)";
+            (e.currentTarget as HTMLElement).style.color = "var(--fg)";
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.background = "transparent";
+            (e.currentTarget as HTMLElement).style.color = "var(--muted-fg)";
+          }}
         >
-          <Languages size={17} strokeWidth={1.75} />
+          <span style={{ fontSize: 16 }}>🌐</span>
           <span>{currentLang === "zh" ? "English" : "中文"}</span>
-        </button>
+        </div>
+
+        {/* Connection status indicator */}
+        <div style={{ marginTop: 16, padding: "0 12px" }}>
+          <div className="flex items-center gap-[7px]" style={{ marginBottom: 4 }}>
+            <div
+              className="pulse-dot rounded-full"
+              style={{
+                width: 8,
+                height: 8,
+                background: running ? "var(--accent-green)" : "var(--muted-fg)",
+                boxShadow: running ? "0 0 8px var(--accent-green)" : "none",
+              }}
+            />
+            <span
+              style={{
+                fontSize: 13,
+                color: running ? "var(--accent-green)" : "var(--muted-fg)",
+                fontWeight: 500,
+              }}
+            >
+              {running
+                ? (currentLang === "zh" ? "连接正常" : "Connected")
+                : (currentLang === "zh" ? "未连接" : "Disconnected")}
+            </span>
+          </div>
+          <div
+            className="tabular"
+            style={{ fontSize: 11, color: "var(--text-muted, #4a5268)" }}
+          >
+            {currentLang === "zh" ? "运行时间" : "Uptime"} {formatUptime(uptime)}
+          </div>
+        </div>
       </div>
     </aside>
   );
