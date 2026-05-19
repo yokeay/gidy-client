@@ -25,6 +25,7 @@ const en: Translations = {
     stop: "Stop",
     starting: "Starting...",
     stopping: "Stopping...",
+    clickToConnect: "Click button to connect",
   },
   systemConfig: {
     title: "System Config",

@@ -23,6 +23,7 @@ const zh = {
     stop: "停止",
     starting: "启动中...",
     stopping: "停止中...",
+    clickToConnect: "点击按钮开始连接",
   },
   systemConfig: {
     title: "系统配置",
