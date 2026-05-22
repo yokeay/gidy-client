@@ -32,6 +32,11 @@ mod proxy_state {
                     server_name: "localhost".into(),
                     listen_addr: "127.0.0.1:1080".parse().unwrap(),
                     log_level: "info".into(),
+                    bandwidth_kbps: 0,
+                    log_level_gidy: "basic".into(),
+                    log_dir: None,
+                    keychain_path: None,
+                    cover_traffic: false,
                 },
                 stats: super::TrafficStats::new(),
                 shutdown_tx: None,
@@ -242,6 +247,11 @@ pub async fn update_config(
         server_name: config.server_name.clone(),
         listen_addr,
         log_level: config.log_level.clone(),
+        bandwidth_kbps: 0,
+        log_level_gidy: "basic".into(),
+        log_dir: None,
+        keychain_path: None,
+        cover_traffic: false,
     };
 
     Ok(config)
