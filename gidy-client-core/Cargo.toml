@@ -2,24 +2,20 @@
 name = "gidy-client-core"
 version.workspace = true
 edition.workspace = true
-description = "gidy client core library - SOCKS5 proxy + QUIC transport"
+description = "gidy client core library - SOCKS5 proxy + HTTP/3 CONNECT transport"
 
 [dependencies]
 gidy-core = { path = "../../gidy-core" }
-tokio = { version = "1", features = ["full"] }
 quinn = "0.11"
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+tokio = { version = "1", features = ["full"] }
 bytes = "1"
-rand = "0.8"
-rand_chacha = "0.3"
-blake3 = "1"
+http = "1"
+rustls = { version = "0.23", features = ["ring"] }
 tracing = "0.1"
 parking_lot = "0.12"
-rustls = { version = "0.23", features = ["ring"] }
-rustls-pemfile = "2"
-rcgen = "0.13"
-zeroize = "1"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 toml = "0.8"
 rand = "0.8"
 rand_chacha = "0.3"
