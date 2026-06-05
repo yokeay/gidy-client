@@ -177,29 +177,37 @@ impl GidyClient {
     }
 
     async fn connect_h2(&self) -> Result<H2SendRequest, String> {
-        let tcp = TcpStream::connect(&self.config.server_addr)
-            .await
-            .map_err(|e| format!("TCP connect: {}", e))?;
+        // Resolve server_name and build TLS config BEFORE opening TCP,
+        // so any early-return Err does not cause RST on an open socket.
+        info!("h2: resolving server_name = {:?}", self.config.server_name);
+        let server_name = rustls::pki_types::ServerName::try_from(self.config.server_name.as_str())
+            .map_err(|e| format!("invalid server name {:?}: {}", self.config.server_name, e))?
+            .to_owned();
 
         let mut tls_config = rustls::ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoVerify))
             .with_no_client_auth();
         tls_config.alpn_protocols = vec![b"h2".to_vec()];
-
         let connector = TlsConnector::from(Arc::new(tls_config));
-        let server_name = rustls::pki_types::ServerName::try_from(self.config.server_name.as_str())
-            .map_err(|e| format!("invalid server name: {}", e))?
-            .to_owned();
+
+        info!("h2: TCP connecting to {}", self.config.server_addr);
+        let tcp = TcpStream::connect(&self.config.server_addr)
+            .await
+            .map_err(|e| format!("TCP connect: {}", e))?;
+        info!("h2: TCP connected, starting TLS handshake");
 
         let tls = connector
             .connect(server_name, tcp)
             .await
             .map_err(|e| format!("TLS: {}", e))?;
+        info!("h2: TLS handshake complete, ALPN = {:?}",
+            tls.get_ref().1.alpn_protocol().map(|p| String::from_utf8_lossy(p).to_string()));
 
         let (send_request, conn) = h2::client::handshake(tls)
             .await
             .map_err(|e| format!("H2 handshake: {}", e))?;
+        info!("h2: H2 handshake complete");
 
         tokio::spawn(async move {
             if let Err(e) = conn.await {
