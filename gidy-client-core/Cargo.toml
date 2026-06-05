@@ -20,3 +20,9 @@ toml = "0.8"
 rand = "0.8"
 rand_chacha = "0.3"
 blake3 = "1"
+hyper = { version = "1", features = ["client", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio", "client", "client-legacy"] }
+tokio-rustls = "0.26"
+http-body-util = "0.1"
+base64 = "0.22"
+h2 = "0.4"

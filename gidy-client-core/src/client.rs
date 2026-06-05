@@ -1,5 +1,6 @@
 use crate::config::ClientConfig;
 use crate::stats::TrafficStats;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use bytes::{Buf, Bytes};
 use gidy_core::{
     Credentials, DpmParams, EntropyEngine, H3_ALPN, KeyChain,
@@ -14,8 +15,23 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio_rustls::TlsConnector;
 use tracing::info;
+
+type H3SendRequest = h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>;
+type H3RequestStream = h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>;
+type H2SendRequest = h2::client::SendRequest<Bytes>;
+
+enum TunnelStream {
+    H3(Arc<AsyncMutex<H3RequestStream>>),
+    H2 {
+        send: h2::SendStream<Bytes>,
+        recv: h2::RecvStream,
+    },
+    Consumed,
+}
 
 pub struct GidyClient {
     config: Arc<ClientConfig>,
@@ -36,50 +52,24 @@ impl GidyClient {
     pub async fn connect(&self) -> Result<Connection, String> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        let roots = rustls::RootCertStore::empty();
-        let mut client_crypto = rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-        client_crypto
-            .dangerous()
-            .set_certificate_verifier(Arc::new(NoVerify));
-        client_crypto.alpn_protocols = vec![H3_ALPN.to_vec()];
-
-        let mut transport = quinn::TransportConfig::default();
-        transport.keep_alive_interval(Some(Duration::from_secs(15)));
-
-        let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto)
-            .map_err(|e| format!("quic crypto: {}", e))?;
-        let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
-        client_config.transport_config(Arc::new(transport));
-
-        let endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().unwrap())
-            .map_err(|e| format!("client endpoint: {}", e))?;
-
-        let addr: std::net::SocketAddr = self
-            .config
-            .server_addr
+        let addr: std::net::SocketAddr = self.config.server_addr
             .parse()
-            .map_err(|e| format!("invalid server addr: {}", e))?;
+            .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
 
-        info!("connecting to {}...", addr);
-        let quinn_conn = endpoint
-            .connect_with(client_config, addr, &self.config.server_name)
-            .map_err(|e| format!("connect: {}", e))?
-            .await
-            .map_err(|e| format!("QUIC: {}", e))?;
-
-        info!("QUIC connected, setting up h3...");
-
-        let h3_conn = h3_quinn::Connection::new(quinn_conn);
-        let (_h3_driver, send_request) = h3::client::builder()
-            .build(h3_conn)
-            .await
-            .map_err(|e| format!("h3 init: {}", e))?;
-
-        tokio::spawn(async move { let _ = _h3_driver; });
-
-        info!("h3 client ready (ALPN: h3)");
+        let send_request = if self.config.protocol == "h2" {
+            info!("connecting via H2 to {}...", self.config.server_addr);
+            let sr = self.connect_h2().await?;
+            ConnectionTransport::H2(Arc::new(AsyncMutex::new(sr)))
+        } else {
+            let quic_addr: std::net::SocketAddr = self
+                .config
+                .server_addr
+                .parse()
+                .map_err(|e| format!("invalid server addr: {}", e))?;
+            info!("connecting via QUIC to {}...", quic_addr);
+            let sr = self.connect_quic(quic_addr).await?;
+            ConnectionTransport::H3(Arc::new(AsyncMutex::new(sr)))
+        };
 
         let keychain = match &self.config.keychain_path {
             Some(path) if path.exists() => {
@@ -131,7 +121,7 @@ impl GidyClient {
         }
 
         Ok(Connection {
-            send_request: Arc::new(AsyncMutex::new(send_request)),
+            send_request,
             psk: self.psk,
             stats: self.stats.clone(),
             keychain: Arc::new(Mutex::new(keychain)),
@@ -144,13 +134,91 @@ impl GidyClient {
             keychain_path: self.config.keychain_path.clone(),
         })
     }
+
+    async fn connect_quic(&self, addr: std::net::SocketAddr) -> Result<H3SendRequest, String> {
+        let roots = rustls::RootCertStore::empty();
+        let mut client_crypto = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        client_crypto
+            .dangerous()
+            .set_certificate_verifier(Arc::new(NoVerify));
+        client_crypto.alpn_protocols = vec![H3_ALPN.to_vec()];
+
+        let mut transport = quinn::TransportConfig::default();
+        transport.keep_alive_interval(Some(Duration::from_secs(15)));
+
+        let quic_client_config = quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto)
+            .map_err(|e| format!("quic crypto: {}", e))?;
+        let mut client_config = quinn::ClientConfig::new(Arc::new(quic_client_config));
+        client_config.transport_config(Arc::new(transport));
+
+        let endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().unwrap())
+            .map_err(|e| format!("client endpoint: {}", e))?;
+
+        let quinn_conn = endpoint
+            .connect_with(client_config, addr, &self.config.server_name)
+            .map_err(|e| format!("connect: {}", e))?
+            .await
+            .map_err(|e| format!("QUIC: {}", e))?;
+
+        info!("QUIC connected, setting up h3...");
+
+        let h3_conn = h3_quinn::Connection::new(quinn_conn);
+        let (_h3_driver, send_request) = h3::client::builder()
+            .build(h3_conn)
+            .await
+            .map_err(|e| format!("h3 init: {}", e))?;
+
+        tokio::spawn(async move { let _ = _h3_driver; });
+
+        info!("h3 client ready");
+        Ok(send_request)
+    }
+
+    async fn connect_h2(&self) -> Result<H2SendRequest, String> {
+        let tcp = TcpStream::connect(&self.config.server_addr)
+            .await
+            .map_err(|e| format!("TCP connect: {}", e))?;
+
+        let mut tls_config = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoVerify))
+            .with_no_client_auth();
+        tls_config.alpn_protocols = vec![b"h2".to_vec()];
+
+        let connector = TlsConnector::from(Arc::new(tls_config));
+        let server_name = rustls::pki_types::ServerName::try_from(self.config.server_name.as_str())
+            .map_err(|e| format!("invalid server name: {}", e))?
+            .to_owned();
+
+        let tls = connector
+            .connect(server_name, tcp)
+            .await
+            .map_err(|e| format!("TLS: {}", e))?;
+
+        let (send_request, conn) = h2::client::handshake(tls)
+            .await
+            .map_err(|e| format!("H2 handshake: {}", e))?;
+
+        tokio::spawn(async move {
+            if let Err(e) = conn.await {
+                info!("h2 conn driver error: {}", e);
+            }
+        });
+
+        info!("h2 client ready");
+        Ok(send_request)
+    }
 }
 
-type H3SendRequest = h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>;
-type H3RequestStream = h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>;
+enum ConnectionTransport {
+    H3(Arc<AsyncMutex<H3SendRequest>>),
+    H2(Arc<AsyncMutex<H2SendRequest>>),
+}
 
 pub struct Connection {
-    send_request: Arc<AsyncMutex<H3SendRequest>>,
+    send_request: ConnectionTransport,
     psk: [u8; 32],
     stats: Arc<TrafficStats>,
     keychain: Arc<Mutex<KeyChain>>,
@@ -167,10 +235,6 @@ impl Connection {
     pub async fn connect_tcp(&self, host: &str, port: u16) -> Result<Tunnel, String> {
         let authority = format!("{}:{}", host, port);
         let psk_hex: String = self.psk.iter().map(|b| format!("{:02x}", b)).collect();
-        let creds = Credentials {
-            username: "gidy".to_string(),
-            password: psk_hex,
-        };
 
         let response_hex: String = {
             let kc = self.keychain.lock();
@@ -178,58 +242,100 @@ impl Connection {
             response.iter().map(|b| format!("{:02x}", b)).collect()
         };
 
-        let uri = format!("https://{}", authority)
-            .parse::<http::Uri>()
-            .map_err(|e| format!("uri: {}", e))?;
-
-        let req = http::Request::builder()
-            .method(http::Method::CONNECT)
-            .uri(uri)
-            .header("proxy-authorization", creds.to_header())
-            .header("x-gidy-response", &response_hex)
-            .header("user-agent", "gidy/2.0.0")
-            .body(())
-            .map_err(|e| format!("build request: {}", e))?;
-
-        let mut sr = self.send_request.lock().await;
-        let mut stream = sr
-            .send_request(req)
-            .await
-            .map_err(|e| format!("send CONNECT: {}", e))?;
-
-        let response = stream
-            .recv_response()
-            .await
-            .map_err(|e| format!("recv response: {}", e))?;
-
-        if response.status() != http::StatusCode::OK {
-            let _ = stream.finish().await;
-            return Err(format!("CONNECT denied: {}", response.status()));
-        }
-
-        self.stats.add_up(authority.len() as u64);
-
         let stream_id = {
             let mut s = self.session.lock();
             let (id, _) = s.streams.open(authority.clone());
             id
         };
 
-        let session_id = {
+        let session_id_str: String = {
             let s = self.session.lock();
             s.id.iter().map(|b| format!("{:02x}", b)).collect()
         };
 
         self.logger.record(&LogEvent::StreamOpen {
-            session_id,
+            session_id: session_id_str,
             stream_id: stream_id as u16,
             target: authority.clone(),
         });
 
+        info!("CONNECT {}...", authority);
+
+        let tunnel_stream = match &self.send_request {
+            ConnectionTransport::H3(sr) => {
+                let creds = Credentials {
+                    username: "gidy".to_string(),
+                    password: psk_hex,
+                };
+                let uri = format!("https://{}", authority)
+                    .parse::<http::Uri>()
+                    .map_err(|e| format!("uri: {}", e))?;
+
+                let req = http::Request::builder()
+                    .method(http::Method::CONNECT)
+                    .uri(uri)
+                    .header("proxy-authorization", creds.to_header())
+                    .header("x-gidy-response", &response_hex)
+                    .header("user-agent", "gidy/2.0.0")
+                    .body(())
+                    .map_err(|e| format!("build request: {}", e))?;
+
+                let mut locked = sr.lock().await;
+                let mut stream = locked
+                    .send_request(req)
+                    .await
+                    .map_err(|e| format!("send CONNECT: {}", e))?;
+
+                let response = stream
+                    .recv_response()
+                    .await
+                    .map_err(|e| format!("recv response: {}", e))?;
+
+                if response.status() != http::StatusCode::OK {
+                    let _ = stream.finish().await;
+                    return Err(format!("CONNECT denied: {}", response.status()));
+                }
+
+                TunnelStream::H3(Arc::new(AsyncMutex::new(stream)))
+            }
+            ConnectionTransport::H2(sr) => {
+                let auth_value = format!(
+                    "Basic {}",
+                    BASE64.encode(format!(":{}", psk_hex))
+                );
+
+                let req = http::Request::builder()
+                    .method("CONNECT")
+                    .uri(authority.parse::<http::Uri>().map_err(|e| format!("uri: {}", e))?)
+                    .header("proxy-authorization", auth_value)
+                    .header("x-gidy-response", &response_hex)
+                    .header("user-agent", "gidy/2.0.0")
+                    .body(())
+                    .map_err(|e| format!("build h2 request: {}", e))?;
+
+                let mut locked = sr.lock().await;
+                // send_request(req, end_of_stream=false) — must NOT set END_STREAM on CONNECT
+                let (resp_future, send_stream) = locked
+                    .send_request(req, false)
+                    .map_err(|e| format!("send h2 CONNECT: {}", e))?;
+
+                let response = resp_future.await.map_err(|e| format!("h2 CONNECT response: {}", e))?;
+
+                if response.status() != http::StatusCode::OK {
+                    return Err(format!("CONNECT denied: {}", response.status()));
+                }
+
+                let recv_stream = response.into_body();
+
+                TunnelStream::H2 { send: send_stream, recv: recv_stream }
+            }
+        };
+
+        self.stats.add_up(authority.len() as u64);
         info!("CONNECT {} -> 200 OK", authority);
 
         Ok(Tunnel {
-            stream: Arc::new(AsyncMutex::new(stream)),
+            stream: Arc::new(AsyncMutex::new(tunnel_stream)),
             stats: self.stats.clone(),
             dpm: self.dpm.clone(),
             entropy: self.entropy.clone(),
@@ -243,34 +349,58 @@ impl Connection {
 
     pub async fn health_check(&self) -> Result<bool, String> {
         let psk_hex: String = self.psk.iter().map(|b| format!("{:02x}", b)).collect();
-        let creds = Credentials {
-            username: "gidy".to_string(),
-            password: psk_hex,
-        };
 
-        let uri = format!("https://{}", PSEUDO_HOST_CHECK)
-            .parse::<http::Uri>()
-            .map_err(|e| format!("uri: {}", e))?;
+        match &self.send_request {
+            ConnectionTransport::H3(sr) => {
+                let creds = Credentials {
+                    username: "gidy".to_string(),
+                    password: psk_hex,
+                };
+                let uri = format!("https://{}", PSEUDO_HOST_CHECK)
+                    .parse::<http::Uri>()
+                    .map_err(|e| format!("uri: {}", e))?;
 
-        let req = http::Request::builder()
-            .method(http::Method::CONNECT)
-            .uri(uri)
-            .header("proxy-authorization", creds.to_header())
-            .body(())
-            .map_err(|e| format!("build request: {}", e))?;
+                let req = http::Request::builder()
+                    .method(http::Method::CONNECT)
+                    .uri(uri)
+                    .header("proxy-authorization", creds.to_header())
+                    .body(())
+                    .map_err(|e| format!("build request: {}", e))?;
 
-        let mut sr = self.send_request.lock().await;
-        let mut stream = sr
-            .send_request(req)
-            .await
-            .map_err(|e| format!("send health: {}", e))?;
+                let mut locked = sr.lock().await;
+                let mut stream = locked
+                    .send_request(req)
+                    .await
+                    .map_err(|e| format!("send health: {}", e))?;
 
-        let response = stream
-            .recv_response()
-            .await
-            .map_err(|e| format!("recv response: {}", e))?;
+                let response = stream
+                    .recv_response()
+                    .await
+                    .map_err(|e| format!("recv response: {}", e))?;
 
-        Ok(response.status() == http::StatusCode::OK)
+                Ok(response.status() == http::StatusCode::OK)
+            }
+            ConnectionTransport::H2(sr) => {
+                let auth_value = format!(
+                    "Basic {}",
+                    BASE64.encode(format!(":{}", psk_hex))
+                );
+                let req = http::Request::builder()
+                    .method("CONNECT")
+                    .uri(PSEUDO_HOST_CHECK.parse::<http::Uri>().map_err(|e| format!("uri: {}", e))?)
+                    .header("proxy-authorization", auth_value)
+                    .body(())
+                    .map_err(|e| format!("build h2 health: {}", e))?;
+
+                let mut locked = sr.lock().await;
+                let (resp_future, _send) = locked
+                    .send_request(req, true)
+                    .map_err(|e| format!("send h2 health: {}", e))?;
+
+                let response = resp_future.await.map_err(|e| format!("h2 health response: {}", e))?;
+                Ok(response.status() == http::StatusCode::OK)
+            }
+        }
     }
 
     pub fn close(&self) {
@@ -315,7 +445,7 @@ impl Connection {
 }
 
 pub struct Tunnel {
-    stream: Arc<AsyncMutex<H3RequestStream>>,
+    stream: Arc<AsyncMutex<TunnelStream>>,
     stats: Arc<TrafficStats>,
     dpm: Arc<Mutex<DpmParams>>,
     entropy: Arc<Mutex<EntropyEngine>>,
@@ -328,12 +458,35 @@ pub struct Tunnel {
 
 impl Tunnel {
     pub async fn relay(&self, tcp: tokio::net::TcpStream) -> Result<(), String> {
-        let (tcp_read, mut tcp_write) = tcp.into_split();
+        let dpm = self.dpm.lock().clone();
+        let padding_min = dpm.padding_min;
+        let stream_id = self.stream_id;
+        let cover_traffic = self.cover_traffic;
+
+        match &*self.stream.lock().await {
+            TunnelStream::H3(_) => {
+                self.relay_h3(tcp, dpm, padding_min, stream_id, cover_traffic).await
+            }
+            TunnelStream::H2 { .. } => {
+                self.relay_h2(tcp, dpm, padding_min, stream_id).await
+            }
+            TunnelStream::Consumed => Err("tunnel already consumed".into()),
+        }
+    }
+
+    async fn relay_h3(
+        &self,
+        tcp: tokio::net::TcpStream,
+        dpm: DpmParams,
+        padding_min: usize,
+        stream_id: u64,
+        cover_traffic: bool,
+    ) -> Result<(), String> {
         let stream = self.stream.clone();
         let stream_reader = stream.clone();
         let stream_writer = stream.clone();
+        let (tcp_read, mut tcp_write) = tcp.into_split();
 
-        let dpm = self.dpm.lock().clone();
         let bandwidth_h3 = self.bandwidth.clone();
         let bandwidth_tcp = self.bandwidth.clone();
         let entropy = self.entropy.clone();
@@ -341,23 +494,21 @@ impl Tunnel {
         let logger_tcp = self.logger.clone();
         let session_h3 = self.session.clone();
         let session_tcp = self.session.clone();
-        let padding_min = dpm.padding_min;
-        let stream_id = self.stream_id;
-        let cover_traffic = self.cover_traffic;
 
-        // h3 -> TCP: strip DPM padding, bandwidth check
         let h3_to_tcp = tokio::spawn(async move {
             let mut seq: u32 = 0;
             loop {
                 let data = {
-                    let mut s = stream_reader.lock().await;
-                    s.recv_data().await
+                    let mut guard = stream_reader.lock().await;
+                    match &mut *guard {
+                        TunnelStream::H3(s) => s.lock().await.recv_data().await,
+                        TunnelStream::H2 { .. } | TunnelStream::Consumed => break,
+                    }
                 };
                 match data {
                     Ok(Some(mut buf)) => {
                         let len = buf.remaining();
                         if len == 0 { break; }
-
                         let chunk = buf.copy_to_bytes(len);
                         let actual_len = len.saturating_sub(padding_min);
                         let actual_data = &chunk[..actual_len.min(len)];
@@ -369,9 +520,7 @@ impl Tunnel {
                                 gidy_core::bwctl::ConsumeResult::Immediate => None,
                             }
                         };
-                        if let Some(d) = sleep_dur {
-                            tokio::time::sleep(d).await;
-                        }
+                        if let Some(d) = sleep_dur { tokio::time::sleep(d).await; }
 
                         {
                             let mut s = session_h3.lock();
@@ -380,9 +529,7 @@ impl Tunnel {
                         logger_h3.record_data_in(stream_id as u16, seq, actual_len, None);
                         seq += 1;
 
-                        if tcp_write.write_all(actual_data).await.is_err() {
-                            break;
-                        }
+                        if tcp_write.write_all(actual_data).await.is_err() { break; }
                     }
                     Ok(None) => break,
                     Err(_) => break,
@@ -390,7 +537,6 @@ impl Tunnel {
             }
         });
 
-        // TCP -> h3: add DPM padding + jitter + entropy, bandwidth check
         let mut tcp_read = tcp_read;
         let mut rng = ChaCha20Rng::from_entropy();
         let mut seq: u32 = 0;
@@ -403,8 +549,6 @@ impl Tunnel {
                 Err(_) => break,
             };
 
-            let actual_data = &buf[..n];
-
             let sleep_dur = {
                 let bw = bandwidth_tcp.lock();
                 match bw.try_consume(n) {
@@ -412,17 +556,12 @@ impl Tunnel {
                     gidy_core::bwctl::ConsumeResult::Immediate => None,
                 }
             };
-            if let Some(d) = sleep_dur {
-                tokio::time::sleep(d).await;
-            }
+            if let Some(d) = sleep_dur { tokio::time::sleep(d).await; }
 
             let jitter = dpm.jitter_us(&mut rng);
-            if jitter > 0 {
-                tokio::time::sleep(Duration::from_micros(jitter)).await;
-            }
+            if jitter > 0 { tokio::time::sleep(Duration::from_micros(jitter)).await; }
 
             let padding_len = dpm.padding_for(n, &mut rng);
-
             let entropy_pad = {
                 let eg = entropy.lock();
                 let profile = eg.active_profile(&dpm);
@@ -431,11 +570,9 @@ impl Tunnel {
 
             let total_len = n + padding_len + entropy_pad;
             let mut output = Vec::with_capacity(total_len);
-            output.extend_from_slice(actual_data);
-
-            let pad_remaining = padding_len + entropy_pad;
-            if pad_remaining > 0 {
-                let mut pad_bytes = vec![0u8; pad_remaining];
+            output.extend_from_slice(&buf[..n]);
+            if padding_len + entropy_pad > 0 {
+                let mut pad_bytes = vec![0u8; padding_len + entropy_pad];
                 rand::Rng::fill(&mut rng, &mut pad_bytes[..]);
                 output.extend_from_slice(&pad_bytes);
             }
@@ -449,9 +586,12 @@ impl Tunnel {
 
             let data = Bytes::from(output);
             {
-                let mut s = stream_writer.lock().await;
-                if s.send_data(data).await.is_err() {
-                    break;
+                let mut guard = stream_writer.lock().await;
+                match &mut *guard {
+                    TunnelStream::H3(s) => {
+                        if s.lock().await.send_data(data).await.is_err() { break; }
+                    }
+                    TunnelStream::H2 { .. } | TunnelStream::Consumed => break,
                 }
             }
         }
@@ -459,14 +599,15 @@ impl Tunnel {
         let _ = h3_to_tcp.await;
 
         {
-            let mut s = stream.lock().await;
-            let _ = s.finish().await;
+            let mut guard = stream.lock().await;
+            if let TunnelStream::H3(s) = &mut *guard {
+                let _ = s.lock().await.finish().await;
+            }
         }
 
-        // Cover traffic
         if cover_traffic && dpm.cover_enabled {
             let (interval, cover_size) = {
-                let eg = entropy.lock();
+                let eg = self.entropy.lock();
                 let profile = eg.active_profile(&dpm);
                 let interval = eg.idle_interval_ms(profile, &mut rng);
                 let cover_size = eg.cover_packet_size(profile, &mut rng);
@@ -476,33 +617,155 @@ impl Tunnel {
             tokio::spawn(async move {
                 loop {
                     tokio::time::sleep(Duration::from_millis(interval)).await;
-                    let cover_data = vec![0u8; cover_size];
-                    let data = Bytes::from(cover_data);
-                    let mut s = stream_cover.lock().await;
-                    if s.send_data(data).await.is_err() {
-                        break;
+                    let data = Bytes::from(vec![0u8; cover_size]);
+                    let mut guard = stream_cover.lock().await;
+                    match &mut *guard {
+                        TunnelStream::H3(s) => {
+                            if s.lock().await.send_data(data).await.is_err() { break; }
+                        }
+                        TunnelStream::H2 { .. } | TunnelStream::Consumed => break,
                     }
                 }
             });
         }
 
-        // Log stream close
-        {
-            let mut s = self.session.lock();
-            if let Some(record) = s.streams.close(stream_id) {
-                let session_id: String = s.id.iter().map(|b| format!("{:02x}", b)).collect();
-                self.logger.record(&LogEvent::StreamClose {
-                    session_id,
-                    stream_id: stream_id as u16,
-                    dur_ms: record.created_at.elapsed().as_millis() as u64,
-                    bytes_in: record.bytes_in,
-                    bytes_out: record.bytes_out,
-                    close_reason: "completed".into(),
-                });
+        self.log_stream_close(stream_id);
+        Ok(())
+    }
+
+    async fn relay_h2(
+        &self,
+        tcp: tokio::net::TcpStream,
+        dpm: DpmParams,
+        padding_min: usize,
+        stream_id: u64,
+    ) -> Result<(), String> {
+        // Take ownership of the H2 streams by replacing with Consumed sentinel
+        let (send_stream, recv_stream) = {
+            let mut guard = self.stream.lock().await;
+            let old = std::mem::replace(&mut *guard, TunnelStream::Consumed);
+            match old {
+                TunnelStream::H2 { send, recv } => (send, recv),
+                _ => return Err("expected H2 tunnel stream".into()),
             }
+        };
+
+        let (tcp_read, mut tcp_write) = tcp.into_split();
+        let bandwidth_down = self.bandwidth.clone();
+        let bandwidth_up = self.bandwidth.clone();
+        let entropy = self.entropy.clone();
+        let logger_down = self.logger.clone();
+        let logger_up = self.logger.clone();
+        let session_down = self.session.clone();
+        let session_up = self.session.clone();
+
+        // h2 -> TCP: read from recv_stream, strip padding, write to tcp
+        let down_task = tokio::spawn(async move {
+            let mut recv_stream = recv_stream;
+            let mut seq: u32 = 0;
+            loop {
+                match recv_stream.data().await {
+                    Some(Ok(data)) => {
+                        let _ = recv_stream.flow_control().release_capacity(data.len());
+                        let len = data.len();
+                        let actual_len = len.saturating_sub(padding_min);
+
+                        let sleep_dur = {
+                            let bw = bandwidth_down.lock();
+                            match bw.try_consume(actual_len) {
+                                gidy_core::bwctl::ConsumeResult::Delayed(d) => Some(d),
+                                gidy_core::bwctl::ConsumeResult::Immediate => None,
+                            }
+                        };
+                        if let Some(d) = sleep_dur { tokio::time::sleep(d).await; }
+
+                        {
+                            let mut s = session_down.lock();
+                            s.streams.get_mut(stream_id).map(|r| r.record_in(actual_len));
+                        }
+                        logger_down.record_data_in(stream_id as u16, seq, actual_len, None);
+                        seq += 1;
+
+                        if tcp_write.write_all(&data[..actual_len.min(len)]).await.is_err() { break; }
+                    }
+                    Some(Err(e)) => { tracing::warn!("h2 recv error: {}", e); break; }
+                    None => break,
+                }
+            }
+        });
+
+        // TCP -> h2: read from tcp, add DPM padding, write to send_stream
+        let mut send_stream = send_stream;
+        let mut tcp_read = tcp_read;
+        let mut rng = ChaCha20Rng::from_entropy();
+        let mut seq: u32 = 0;
+        let mut buf = [0u8; 8192];
+
+        loop {
+            let n = match tcp_read.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(_) => break,
+            };
+
+            let sleep_dur = {
+                let bw = bandwidth_up.lock();
+                match bw.try_consume(n) {
+                    gidy_core::bwctl::ConsumeResult::Delayed(d) => Some(d),
+                    gidy_core::bwctl::ConsumeResult::Immediate => None,
+                }
+            };
+            if let Some(d) = sleep_dur { tokio::time::sleep(d).await; }
+
+            let jitter = dpm.jitter_us(&mut rng);
+            if jitter > 0 { tokio::time::sleep(Duration::from_micros(jitter)).await; }
+
+            let padding_len = dpm.padding_for(n, &mut rng);
+            let entropy_pad = {
+                let eg = entropy.lock();
+                let profile = eg.active_profile(&dpm);
+                eg.padding_for(profile, n + padding_len, &dpm, &mut rng)
+            };
+
+            let pad_total = padding_len + entropy_pad;
+            let mut output = Vec::with_capacity(n + pad_total);
+            output.extend_from_slice(&buf[..n]);
+            if pad_total > 0 {
+                let mut pb = vec![0u8; pad_total];
+                rand::Rng::fill(&mut rng, &mut pb[..]);
+                output.extend_from_slice(&pb);
+            }
+
+            {
+                let mut s = session_up.lock();
+                s.streams.get_mut(stream_id).map(|r| r.record_out(n));
+            }
+            logger_up.record_data_out(stream_id as u16, seq, n, 0, None);
+            seq += 1;
+
+            send_stream.reserve_capacity(output.len());
+            if send_stream.send_data(Bytes::from(output), false).is_err() { break; }
         }
 
+        let _ = send_stream.send_data(Bytes::new(), true);
+        let _ = down_task.await;
+        self.log_stream_close(stream_id);
         Ok(())
+    }
+
+    fn log_stream_close(&self, stream_id: u64) {
+        let mut s = self.session.lock();
+        if let Some(record) = s.streams.close(stream_id) {
+            let session_id: String = s.id.iter().map(|b| format!("{:02x}", b)).collect();
+            self.logger.record(&LogEvent::StreamClose {
+                session_id,
+                stream_id: stream_id as u16,
+                dur_ms: record.created_at.elapsed().as_millis() as u64,
+                bytes_in: record.bytes_in,
+                bytes_out: record.bytes_out,
+                close_reason: "completed".into(),
+            });
+        }
     }
 }
 
@@ -540,10 +803,8 @@ impl rustls::client::danger::ServerCertVerifier for NoVerify {
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::RSA_PKCS1_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::ED25519,
-        ]
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
