@@ -312,9 +312,16 @@ impl Connection {
                     BASE64.encode(format!(":{}", psk_hex))
                 );
 
+                // H2 CONNECT: URI must be authority-only (RFC 7540 §8.3)
+                // No scheme or path — h2 crate enforces this and strips them for CONNECT.
+                let uri = http::Uri::builder()
+                    .authority(authority.as_str())
+                    .build()
+                    .map_err(|e| format!("build h2 uri: {}", e))?;
+
                 let req = http::Request::builder()
                     .method("CONNECT")
-                    .uri(authority.parse::<http::Uri>().map_err(|e| format!("uri: {}", e))?)
+                    .uri(uri)
                     .header("proxy-authorization", auth_value)
                     .header("x-gidy-response", &response_hex)
                     .header("user-agent", "gidy/2.0.0")
@@ -393,9 +400,13 @@ impl Connection {
                     "Basic {}",
                     BASE64.encode(format!(":{}", psk_hex))
                 );
+                let uri = http::Uri::builder()
+                    .authority(PSEUDO_HOST_CHECK)
+                    .build()
+                    .map_err(|e| format!("build h2 health uri: {}", e))?;
                 let req = http::Request::builder()
                     .method("CONNECT")
-                    .uri(PSEUDO_HOST_CHECK.parse::<http::Uri>().map_err(|e| format!("uri: {}", e))?)
+                    .uri(uri)
                     .header("proxy-authorization", auth_value)
                     .body(())
                     .map_err(|e| format!("build h2 health: {}", e))?;
