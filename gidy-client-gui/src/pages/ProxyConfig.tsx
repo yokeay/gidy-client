@@ -185,16 +185,17 @@ export default function ProxyConfig() {
         <div style={{ display: "flex", gap: 0 }}>
           {/* Left: vertical protocol menu */}
           <div style={{
-            width: 80, flexShrink: 0,
+            width: 72, flexShrink: 0, alignSelf: "flex-start",
             background: "var(--card)", border: "1px solid var(--border)",
-            borderRadius: 10, padding: 4, position: "relative",
+            borderRadius: 10, padding: 3, position: "relative",
+            display: "grid",
           }}>
             {/* Sliding highlight for vertical menu */}
             <div style={{
-              position: "absolute", top: 4 + activeIdx * 46, left: 4,
-              width: 72, height: 42,
+              position: "absolute", top: 3 + activeIdx * 36, left: 3,
+              width: 66, height: 36,
               background: "linear-gradient(135deg, rgba(46,204,113,0.22), rgba(46,204,113,0.08))",
-              border: "1px solid rgba(46,204,113,0.5)", borderRadius: 8,
+              border: "1px solid rgba(46,204,113,0.5)", borderRadius: 7,
               transition: "top 0.25s cubic-bezier(0.4,0,0.2,1)",
               pointerEvents: "none",
             }} />
@@ -203,11 +204,12 @@ export default function ProxyConfig() {
                 key={p.key}
                 onClick={() => handleProtocolSelect(p.key)}
                 style={{
-                  height: 42, borderRadius: 8, border: "none",
+                  width: 66, height: 36, borderRadius: 7, border: "none",
                   background: "transparent", cursor: "pointer", position: "relative", zIndex: 1,
                   fontSize: 13, fontWeight: 600, fontFamily: "var(--font-mono)", letterSpacing: "0.08em",
                   color: activeProtocol === p.key ? "var(--accent-green)" : "var(--muted-fg)",
                   transition: "color 0.15s",
+                  display: "flex", alignItems: "center", justifyContent: "center",
                 }}
               >
                 {p.label}
