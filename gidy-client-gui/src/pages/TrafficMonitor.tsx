@@ -4,25 +4,17 @@ import SpeedChart from "../components/SpeedChart";
 import {
   getStats,
   getStatus,
+  getConnectionLogs,
   formatBytes,
   formatSpeed,
   StatsSnapshot,
+  ConnectionLogEntry,
 } from "../api";
 
 interface ChartPoint {
   time: number;
   up: number;
   down: number;
-}
-
-interface ConnectionLog {
-  time: string;
-  process: string;
-  protocol: string;
-  local: string;
-  remote: string;
-  speedUp: string;
-  speedDown: string;
 }
 
 export default function TrafficMonitor() {
@@ -33,10 +25,9 @@ export default function TrafficMonitor() {
     uptime_secs: 0, active_connections: 0,
   });
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
-  const [logs, setLogs] = useState<ConnectionLog[]>([]);
-  const [running, setRunning] = useState(false);
+  const [logs, setLogs] = useState<ConnectionLogEntry[]>([]);
+  const [_running, setRunning] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-  const logidRef = useRef(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -48,24 +39,17 @@ export default function TrafficMonitor() {
         if (next.length > 60) return next.slice(-60);
         return next;
       });
-      if (s.active_connections > 0 && st.running) {
-        const id = ++logidRef.current;
-        const protocols = ["TCP", "UDP", "TCP"];
-        const processes = ["Chrome.exe", "gidy-client.exe", "System"];
-        setLogs(prev => {
-          const entry: ConnectionLog = {
-            time: new Date().toLocaleTimeString(),
-            process: processes[id % 3],
-            protocol: protocols[id % 3],
-            local: `192.168.1.100:${50000 + (id % 999)}`,
-            remote: `conn-${id}.example.com:443`,
-            speedUp: formatSpeed(s.speed_up_kbps / Math.max(1, s.active_connections)),
-            speedDown: formatSpeed(s.speed_down_kbps / Math.max(1, s.active_connections)),
-          };
-          const next = [entry, ...prev];
-          if (next.length > 100) return next.slice(0, 100);
-          return next;
-        });
+
+      // Fetch real connection logs from backend
+      if (st.running) {
+        try {
+          const newLogs = await getConnectionLogs();
+          setLogs(newLogs);
+        } catch {
+          // ignore
+        }
+      } else {
+        setLogs([]);
       }
     } catch {}
   }, []);
@@ -81,7 +65,7 @@ export default function TrafficMonitor() {
     { label: t("trafficMonitor.download"), value: formatSpeed(stats.speed_down_kbps), arrow: "↓", color: "var(--accent-blue)" },
     { label: t("trafficMonitor.totalUpload"), value: formatBytes(stats.bytes_up), color: "var(--fg)" },
     { label: t("trafficMonitor.totalDownload"), value: formatBytes(stats.bytes_down), color: "var(--fg)" },
-    { label: t("trafficMonitor.connectionLog"), value: String(stats.active_connections), suffix: running ? "个" : "-", color: "var(--fg)" },
+    { label: t("trafficMonitor.connectionLog"), value: String(logs.length), suffix: "个", color: "var(--fg)" },
   ];
 
   return (
@@ -97,9 +81,7 @@ export default function TrafficMonitor() {
               border: "1px solid var(--border)",
               borderRadius: 10,
               padding: 16,
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
+              display: "flex", flexDirection: "column", gap: 6,
               transition: "border-color 0.15s, transform 0.15s",
             }}
             onMouseEnter={e => {
@@ -132,14 +114,7 @@ export default function TrafficMonitor() {
       </div>
 
       {/* ── Chart ── */}
-      <div
-        style={{
-          background: "var(--card)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          padding: 20,
-        }}
-      >
+      <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: 20 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <span style={{ fontSize: 14, fontWeight: 500, color: "var(--fg)" }}>
@@ -164,41 +139,21 @@ export default function TrafficMonitor() {
       </div>
 
       {/* ── Connection table ── */}
-      <div
-        style={{
-          background: "var(--card)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            padding: "16px 20px 12px",
-            borderBottom: "1px solid var(--border)",
-            fontSize: 14,
-            fontWeight: 500,
-            color: "var(--fg)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
+      <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", marginBottom: 32 }}>
+        <div style={{
+          padding: "16px 20px 12px",
+          borderBottom: "1px solid var(--border)",
+          fontSize: 14, fontWeight: 500, color: "var(--fg)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
           <span>{t("trafficMonitor.connectionLog")}</span>
           <button
             onClick={() => setLogs([])}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              background: "transparent",
-              border: "none",
-              color: "var(--muted-fg)",
-              fontSize: 12,
-              cursor: "pointer",
-              padding: "5px 10px",
-              borderRadius: 6,
-              fontFamily: "var(--font-ui)",
+              display: "flex", alignItems: "center", gap: 5,
+              background: "transparent", border: "none",
+              color: "var(--muted-fg)", fontSize: 12, cursor: "pointer",
+              padding: "5px 10px", borderRadius: 6, fontFamily: "var(--font-ui)",
               transition: "all 0.15s",
             }}
             onMouseEnter={e => {
@@ -217,19 +172,13 @@ export default function TrafficMonitor() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {["应用/进程", "协议", "本地地址", "远程地址", "上传速度", "下载速度", "状态"].map(h => (
-                  <th
-                    key={h}
-                    style={{
-                      padding: "10px 16px",
-                      textAlign: "left",
-                      fontSize: 11,
-                      color: "var(--text-muted, #4a5268)",
-                      fontWeight: 500,
-                      letterSpacing: "0.06em",
-                      background: "rgba(255,255,255,0.02)",
-                    }}
-                  >
+                {[t("trafficMonitor.time"), t("trafficMonitor.target"), t("trafficMonitor.type")].map(h => (
+                  <th key={h} style={{
+                    padding: "10px 16px", textAlign: "left",
+                    fontSize: 11, color: "var(--text-muted, #4a5268)",
+                    fontWeight: 500, letterSpacing: "0.06em",
+                    background: "rgba(255,255,255,0.02)",
+                  }}>
                     {h}
                   </th>
                 ))}
@@ -238,39 +187,26 @@ export default function TrafficMonitor() {
             <tbody>
               {logs.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={7}
-                    style={{ padding: "40px 0", textAlign: "center", color: "var(--muted-fg)", fontSize: 13 }}
-                  >
+                  <td colSpan={3} style={{ padding: "40px 0", textAlign: "center", color: "var(--muted-fg)", fontSize: 13 }}>
                     {t("trafficMonitor.noData")}
                   </td>
                 </tr>
               ) : (
-                logs.map((log, i) => (
+                [...logs].reverse().map((log, i) => (
                   <tr
                     key={i}
                     style={{ borderTop: "1px solid var(--border)" }}
                     onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.02)")}
                     onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "transparent")}
                   >
-                    <td style={{ padding: "13px 16px", fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--fg)" }}>
-                      {log.process}
-                    </td>
-                    <td style={{ padding: "13px 16px", fontSize: 13, color: "var(--muted-fg)" }}>{log.protocol}</td>
                     <td style={{ padding: "13px 16px", fontSize: 12, color: "var(--muted-fg)", fontFamily: "var(--font-mono)" }}>
-                      {log.local}
+                      {log.connected_at}
                     </td>
-                    <td style={{ padding: "13px 16px", fontSize: 12, color: "var(--muted-fg)", fontFamily: "var(--font-mono)" }}>
-                      {log.remote}
+                    <td style={{ padding: "13px 16px", fontSize: 12, color: "var(--fg)", fontFamily: "var(--font-mono)" }}>
+                      {log.target}
                     </td>
-                    <td style={{ padding: "13px 16px", fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--accent-green)" }}>
-                      ↑ {log.speedUp}
-                    </td>
-                    <td style={{ padding: "13px 16px", fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--accent-blue)" }}>
-                      ↓ {log.speedDown}
-                    </td>
-                    <td style={{ padding: "13px 16px", fontSize: 13, color: "var(--accent-green)", fontWeight: 500 }}>
-                      活动
+                    <td style={{ padding: "13px 16px", fontSize: 12, color: "var(--accent-green)", fontWeight: 500 }}>
+                      {log.protocol}
                     </td>
                   </tr>
                 ))
@@ -278,17 +214,12 @@ export default function TrafficMonitor() {
             </tbody>
           </table>
         </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 20px",
-            borderTop: "1px solid var(--border)",
-          }}
-        >
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "12px 20px", borderTop: "1px solid var(--border)",
+        }}>
           <span style={{ fontSize: 12, color: "var(--text-muted, #4a5268)" }}>
-            共 {stats.active_connections} 个连接
+            {logs.length} 个连接
           </span>
         </div>
       </div>

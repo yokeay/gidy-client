@@ -12,7 +12,6 @@ h3-quinn = "0.0.10"
 tokio = { version = "1", features = ["full"] }
 bytes = "1"
 http = "1"
-rustls = { version = "0.23", features = ["ring"] }
 tracing = "0.1"
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
@@ -26,6 +25,9 @@ tokio-rustls = "0.26"
 http-body-util = "0.1"
 base64 = "0.22"
 h2 = "0.4"
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 tungstenite = "0.24"
 futures-util = "0.3"
+url = "2"
+hickory-resolver = { version = "0.24", features = ["dns-over-https-rustls"] }
+rustls = { version = "0.23", features = ["aws_lc_rs"] }

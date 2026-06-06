@@ -33,11 +33,18 @@ pub struct ClientConfig {
 
     #[serde(default = "default_protocol")]
     pub protocol: String,
+
+    /// Base64-encoded ECH config list (from DNS HTTPS record's ech param).
+    /// If set, ECH is enabled without needing DNS lookup (useful when DoH is blocked).
+    pub ech_config_base64: Option<String>,
+
+    /// Token for the ECH config refresh API endpoint.
+    pub ech_token: Option<String>,
 }
 
 fn default_protocol() -> String { "ws".into() }
 fn default_server_addr() -> String { "wss://gidy.eu.cc/ws".into() }
-fn default_listen_addr() -> SocketAddr { "127.0.0.1:1080".parse().unwrap() }
+fn default_listen_addr() -> SocketAddr { "127.0.0.1:5555".parse().unwrap() }
 fn default_log_level() -> String { "info".into() }
 fn default_server_name() -> String { "gidy.eu.cc".into() }
 fn default_log_level_gidy() -> String { "basic".into() }
@@ -79,5 +86,7 @@ pub fn generate_default_config() -> ClientConfig {
         keychain_path: None,
         cover_traffic: false,
         protocol: default_protocol(),
+        ech_config_base64: None,
+        ech_token: None,
     }
 }

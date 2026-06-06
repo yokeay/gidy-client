@@ -9,6 +9,10 @@ use gidy_core::{
     current_epoch,
 };
 use gidy_core::keys::hmac_challenge;
+use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::proto::rr::RecordType;
 use parking_lot::Mutex;
 use rand_chacha::ChaCha20Rng;
 use rand::SeedableRng;
@@ -19,7 +23,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_rustls::TlsConnector;
-use tokio_tungstenite::{connect_async, tungstenite};
+use tokio_tungstenite::{client_async, tungstenite};
 use tracing::info;
 
 // WebSocket tunnel frame types
@@ -35,7 +39,7 @@ type H3SendRequest = h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>;
 type H3RequestStream = h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>;
 type H2SendRequest = h2::client::SendRequest<Bytes>;
 type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
 >;
 
 enum TunnelStream {
@@ -65,7 +69,7 @@ impl GidyClient {
     }
 
     pub async fn connect(&self) -> Result<Connection, String> {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let addr: std::net::SocketAddr = self.config.server_addr
             .parse()
@@ -73,7 +77,7 @@ impl GidyClient {
 
         let transport = if self.config.protocol == "ws" {
             info!("connecting via WebSocket to {}...", self.config.server_addr);
-            let ws = self.connect_ws().await?;
+            let ws = establish_ws_connection(&self.config, &self.psk).await?;
             ConnectionTransport::WS(Arc::new(AsyncMutex::new(Some(ws))))
         } else if self.config.protocol == "h2" {
             info!("connecting via H2 to {}...", self.config.server_addr);
@@ -141,6 +145,7 @@ impl GidyClient {
 
         Ok(Connection {
             transport,
+            config: self.config.clone(),
             psk: self.psk,
             stats: self.stats.clone(),
             keychain: Arc::new(Mutex::new(keychain)),
@@ -152,48 +157,6 @@ impl GidyClient {
             cover_traffic: self.config.cover_traffic,
             keychain_path: self.config.keychain_path.clone(),
         })
-    }
-
-    async fn connect_ws(&self) -> Result<WsStream, String> {
-        let ws_url = self.config.server_addr.clone();
-        info!("ws: connecting to {}", ws_url);
-
-        let (ws_stream, _response) = connect_async(&ws_url)
-            .await
-            .map_err(|e| format!("WS connect: {}", e))?;
-
-        info!("ws: connected, authenticating");
-
-        // AUTH_REQUEST: 0x01 + Basic base64(gidy:PSK_HEX)
-        let psk_hex: String = self.psk.iter().map(|b| format!("{:02x}", b)).collect();
-        let auth_value = format!("Basic {}", BASE64.encode(format!("gidy:{}", psk_hex)));
-        let mut auth_frame = vec![FRAME_AUTH_REQUEST];
-        auth_frame.extend_from_slice(auth_value.as_bytes());
-
-        let mut ws = ws_stream;
-        ws.send(tungstenite::Message::Binary(auth_frame.into()))
-            .await
-            .map_err(|e| format!("ws send auth: {}", e))?;
-
-        // Wait for AUTH_RESPONSE
-        let msg = ws.next().await
-            .ok_or_else(|| "ws: connection closed before auth response".to_string())?
-            .map_err(|e| format!("ws recv auth: {}", e))?;
-
-        match msg {
-            tungstenite::Message::Binary(data) => {
-                if data.len() < 2 || data[0] != FRAME_AUTH_RESPONSE {
-                    return Err(format!("ws: unexpected auth response frame type: {:?}", data.first()));
-                }
-                if data[1] != 0x00 {
-                    return Err("ws: authentication failed".into());
-                }
-            }
-            _ => return Err("ws: unexpected non-binary auth response".into()),
-        }
-
-        info!("ws: authenticated OK");
-        Ok(ws)
     }
 
     async fn connect_quic(&self, addr: std::net::SocketAddr) -> Result<H3SendRequest, String> {
@@ -274,6 +237,225 @@ impl GidyClient {
     }
 }
 
+/// Standalone function to establish a new WS connection (TCP → TLS → WS upgrade → AUTH).
+/// Reused by both GidyClient::connect() and Connection::connect_tcp().
+async fn establish_ws_connection(
+    config: &ClientConfig,
+    psk: &[u8; 32],
+) -> Result<WsStream, String> {
+    let ws_url = config.server_addr.clone();
+    let url = url::Url::parse(&ws_url)
+        .map_err(|e| format!("ws: invalid URL {}: {}", ws_url, e))?;
+
+    let host = url.host_str().ok_or_else(|| "ws: no host in URL".to_string())?;
+    let port = url.port().unwrap_or(443);
+    let path = url.path();
+    let addr = format!("{}:{}", host, port);
+    let server_name = rustls::pki_types::ServerName::try_from(host)
+        .map_err(|e| format!("invalid server name: {}", e))?
+        .to_owned();
+
+    info!("ws: resolving ECH config for {}", host);
+
+    let initial_ech = match ech_config_from_file(config) {
+        Some(ec) => {
+            info!("ws: ECH config loaded from config file");
+            Some(ec)
+        }
+        None => fetch_ech_config(host).await,
+    };
+
+    // Try ECH connection, with retry on server rejection (ECH key rotation)
+    let mut ech_attempt = initial_ech;
+    // Try ECH connection, handle rejection gracefully
+
+    let tls = loop {
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let tls_config = match ech_attempt {
+            Some(ref ec) => {
+                info!("ws: ECH enabled, outer SNI will be cloudflare-ech.com");
+                rustls::ClientConfig::builder_with_provider(provider)
+                    .with_ech(rustls::client::EchMode::Enable(ec.clone()))
+                    .map_err(|e| format!("ws: ECH config error: {}", e))?
+                    .dangerous()
+                    .with_custom_certificate_verifier(Arc::new(NoVerify))
+                    .with_no_client_auth()
+            }
+            None => {
+                info!("ws: ECH not available, using direct SNI");
+                rustls::ClientConfig::builder_with_provider(provider)
+                    .with_protocol_versions(&[&rustls::version::TLS12, &rustls::version::TLS13])
+                    .map_err(|e| format!("ws: protocol versions error: {}", e))?
+                    .dangerous()
+                    .with_custom_certificate_verifier(Arc::new(NoVerify))
+                    .with_no_client_auth()
+            }
+        };
+
+        info!("ws: TCP connecting to {}", addr);
+        let tcp = TcpStream::connect(&addr)
+            .await
+            .map_err(|e| format!("ws TCP connect: {}", e))?;
+        info!("ws: TCP connected");
+
+        let connector = TlsConnector::from(Arc::new(tls_config));
+        match connector.connect(server_name.clone(), tcp).await {
+            Ok(tls) => {
+                info!("ws: TLS handshake complete");
+                break tls;
+            }
+            Err(io_err) => {
+                // Try to extract rustls::Error from the io::Error
+                let rustls_err = io_err.get_ref()
+                    .and_then(|e| e.downcast_ref::<rustls::Error>());
+
+                let retry_configs = rustls_err.and_then(|e| match e {
+                    rustls::Error::PeerIncompatible(
+                        rustls::PeerIncompatible::ServerRejectedEncryptedClientHello(rc)
+                    ) => rc.clone(),
+                    _ => None,
+                });
+
+                match retry_configs {
+                    Some(configs) if !configs.is_empty() => {
+                        // ECH was rejected — the config has expired (CF rotates keys every few hours).
+                        // Do NOT fall back to no-ECH because GFW blocks the SNI.
+                        // Return a clear error so the user knows to update ech_config_base64.
+                        info!("ws: ECH rejected, server provided {} retry config(s) — config expired", configs.len());
+                        return Err(
+                            "ECH config 已过期，请更新 ech_config_base64。\n\
+                             获取方式：在非GFW环境执行 dig HTTPS gidy.eu.cc +short，取 ech= 后的 base64 值".into()
+                        );
+                    }
+                    _ => {
+                        // Non-ECH-rejection TLS error (e.g. GFW RST, network issue)
+                        // If we were trying with ECH, give a clear message instead of a confusing RST error
+                        if ech_attempt.is_some() {
+                            return Err(
+                                "TLS 连接失败，ECH 可能已过期。请更新 ech_config_base64 后重试。\n\
+                                 获取方式：在非GFW环境执行 dig HTTPS gidy.eu.cc +short".into()
+                            );
+                        } else {
+                            return Err(format!("ws TLS: {}", io_err));
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    let ws_uri = format!("wss://{}:{}{}", host, port, path);
+    let ws_request = tungstenite::handshake::client::Request::builder()
+        .uri(&ws_uri)
+        .header("Host", host)
+        .header("Upgrade", "websocket")
+        .header("Connection", "Upgrade")
+        .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
+        .header("Sec-WebSocket-Version", "13")
+        .body(())
+        .map_err(|e| format!("ws build request: {}", e))?;
+
+    let (ws_stream, _response) = client_async(ws_request, tls)
+        .await
+        .map_err(|e| format!("ws upgrade: {}", e))?;
+
+    info!("ws: connected, authenticating");
+
+    let psk_hex: String = psk.iter().map(|b| format!("{:02x}", b)).collect();
+    let auth_value = format!("Basic {}", BASE64.encode(format!("gidy:{}", psk_hex)));
+    let mut auth_frame = vec![FRAME_AUTH_REQUEST];
+    auth_frame.extend_from_slice(auth_value.as_bytes());
+
+    let mut ws = ws_stream;
+    ws.send(tungstenite::Message::Binary(auth_frame.into()))
+        .await
+        .map_err(|e| format!("ws send auth: {}", e))?;
+
+    let msg = ws.next().await
+        .ok_or_else(|| "ws: connection closed before auth response".to_string())?
+        .map_err(|e| format!("ws recv auth: {}", e))?;
+
+    match msg {
+        tungstenite::Message::Binary(data) => {
+            if data.len() < 2 || data[0] != FRAME_AUTH_RESPONSE {
+                return Err(format!("ws: unexpected auth response frame type: {:?}", data.first()));
+            }
+            if data[1] != 0x00 {
+                return Err("ws: authentication failed".into());
+            }
+        }
+        _ => return Err("ws: unexpected non-binary auth response".into()),
+    }
+
+    info!("ws: authenticated OK");
+    Ok(ws)
+}
+
+pub fn ech_config_from_file(config: &ClientConfig) -> Option<rustls::client::EchConfig> {
+    let b64 = config.ech_config_base64.as_ref()?;
+    let ech_bytes = BASE64.decode(b64.as_bytes()).ok()?;
+    info!("ws: decoded ECH config from file ({} bytes)", ech_bytes.len());
+    rustls::client::EchConfig::new(
+        rustls::pki_types::EchConfigListBytes::from(ech_bytes.as_slice()),
+        rustls::crypto::aws_lc_rs::hpke::ALL_SUPPORTED_SUITES,
+    ).ok()
+}
+
+async fn fetch_ech_config(domain: &str) -> Option<rustls::client::EchConfig> {
+    let mut opts = hickory_resolver::config::ResolverOpts::default();
+    opts.timeout = Duration::from_secs(3);
+    opts.attempts = 1;
+
+    let doh_providers = [
+        ("Cloudflare", ResolverConfig::cloudflare_https()),
+        ("Google", ResolverConfig::google_https()),
+    ];
+
+    let name = match domain.parse::<hickory_resolver::proto::rr::Name>() {
+        Ok(n) => n,
+        Err(_) => return None,
+    };
+
+    for (label, config) in &doh_providers {
+        info!("ws: trying {} DoH for HTTPS record of {}", label, domain);
+        let resolver = TokioAsyncResolver::new(
+            config.clone(),
+            opts.clone(),
+            TokioConnectionProvider::default(),
+        );
+
+        match tokio::time::timeout(Duration::from_secs(5), resolver.lookup(name.clone(), RecordType::HTTPS)).await {
+            Ok(Ok(response)) => {
+                for rdata in response.iter() {
+                    if let hickory_resolver::proto::rr::RData::HTTPS(ref https) = rdata {
+                        for (key, value) in https.svc_params() {
+                            if let hickory_resolver::proto::rr::rdata::svcb::SvcParamKey::EchConfig = key {
+                                if let hickory_resolver::proto::rr::rdata::svcb::SvcParamValue::EchConfig(ref ech) = value {
+                                    let ech_bytes: &[u8] = ech.0.as_ref();
+                                    info!("ws: found ECH config in DNS ({} bytes) via {}", ech_bytes.len(), label);
+                                    match rustls::client::EchConfig::new(
+                                        rustls::pki_types::EchConfigListBytes::from(ech_bytes),
+                                        rustls::crypto::aws_lc_rs::hpke::ALL_SUPPORTED_SUITES,
+                                    ) {
+                                        Ok(ec) => return Some(ec),
+                                        Err(e) => info!("ws: ECH config parse error: {}", e),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                info!("ws: no ECH config in HTTPS records via {}", label);
+            }
+            Ok(Err(e)) => info!("ws: {} DoH lookup failed: {}", label, e),
+            Err(_) => info!("ws: {} DoH lookup timed out", label),
+        }
+    }
+
+    info!("ws: ECH not available — all DoH providers failed or no ECH record");
+    None
+}
+
 enum ConnectionTransport {
     H3(Arc<AsyncMutex<H3SendRequest>>),
     H2(Arc<AsyncMutex<H2SendRequest>>),
@@ -282,6 +464,7 @@ enum ConnectionTransport {
 
 pub struct Connection {
     transport: ConnectionTransport,
+    config: Arc<ClientConfig>,
     psk: [u8; 32],
     stats: Arc<TrafficStats>,
     keychain: Arc<Mutex<KeyChain>>,
@@ -395,10 +578,13 @@ impl Connection {
                 let recv_stream = response.into_body();
                 TunnelStream::H2 { send: send_stream, recv: recv_stream }
             }
-            ConnectionTransport::WS(ws_arc) => {
-                // Send CONNECT frame on the WS stream
-                let mut locked = ws_arc.lock().await;
-                let ws = locked.as_mut().ok_or_else(|| "ws: stream already taken".to_string())?;
+            ConnectionTransport::WS(_ws_arc) => {
+                // Always create a fresh WS connection for each tunnel.
+                // Reusing the initial idle connection can fail if the server
+                // has closed it during the idle period between connect() and
+                // the first SOCKS5 request.
+                info!("ws: creating new connection for tunnel to {}", authority);
+                let mut ws = establish_ws_connection(&self.config, &self.psk).await?;
 
                 // CONNECT frame: 0x03 + authority
                 let mut connect_frame = vec![FRAME_CONNECT];
@@ -431,9 +617,7 @@ impl Connection {
                     _ => return Err("ws: unexpected non-binary connect response".into()),
                 }
 
-                // Take the WS stream out of the Option and move into TunnelStream
-                let ws_stream = locked.take().ok_or_else(|| "ws: stream already taken".to_string())?;
-                TunnelStream::WS(ws_stream)
+                TunnelStream::WS(ws)
             }
         };
 
@@ -512,24 +696,30 @@ impl Connection {
             }
             ConnectionTransport::WS(ws_arc) => {
                 let mut locked = ws_arc.lock().await;
-                let ws = locked.as_mut().ok_or_else(|| "ws: stream already taken".to_string())?;
+                match locked.as_mut() {
+                    Some(ws) => {
+                        // CONNECT frame with authority = "_check"
+                        let mut frame = vec![FRAME_CONNECT];
+                        frame.extend_from_slice(PSEUDO_HOST_CHECK.as_bytes());
+                        ws.send(tungstenite::Message::Binary(frame.into()))
+                            .await
+                            .map_err(|e| format!("ws send health: {}", e))?;
 
-                // CONNECT frame with authority = "_check"
-                let mut frame = vec![FRAME_CONNECT];
-                frame.extend_from_slice(PSEUDO_HOST_CHECK.as_bytes());
-                ws.send(tungstenite::Message::Binary(frame.into()))
-                    .await
-                    .map_err(|e| format!("ws send health: {}", e))?;
+                        let msg = ws.next().await
+                            .ok_or_else(|| "ws: closed before health response".to_string())?
+                            .map_err(|e| format!("ws recv health: {}", e))?;
 
-                let msg = ws.next().await
-                    .ok_or_else(|| "ws: closed before health response".to_string())?
-                    .map_err(|e| format!("ws recv health: {}", e))?;
-
-                match msg {
-                    tungstenite::Message::Binary(data) if !data.is_empty() => {
-                        Ok(data[0] == FRAME_CONNECT_OK)
+                        match msg {
+                            tungstenite::Message::Binary(data) if !data.is_empty() => {
+                                Ok(data[0] == FRAME_CONNECT_OK)
+                            }
+                            _ => Ok(false),
+                        }
                     }
-                    _ => Ok(false),
+                    None => {
+                        // Initial WS stream taken by a tunnel; assume healthy
+                        Ok(true)
+                    }
                 }
             }
         }
@@ -589,23 +779,41 @@ pub struct Tunnel {
 }
 
 impl Tunnel {
-    pub async fn relay(&self, tcp: tokio::net::TcpStream) -> Result<(), String> {
+    pub async fn relay(&self, tcp: tokio::net::TcpStream, prefix: Option<&[u8]>) -> Result<(), String> {
         let dpm = self.dpm.lock().clone();
         let padding_min = dpm.padding_min;
         let stream_id = self.stream_id;
         let cover_traffic = self.cover_traffic;
 
-        match &*self.stream.lock().await {
-            TunnelStream::H3(_) => {
+        // Determine transport type without holding the lock
+        let transport_type = {
+            let guard = self.stream.lock().await;
+            match &*guard {
+                TunnelStream::H3(_) => 0u8,
+                TunnelStream::H2 { .. } => 1u8,
+                TunnelStream::WS(_) => 2u8,
+                TunnelStream::Consumed => 3u8,
+            }
+            // guard dropped here
+        };
+
+        match transport_type {
+            0 => {
+                if let Some(pre) = prefix {
+                    tracing::warn!("h3 relay ignoring prefix {} bytes (unexpected)", pre.len());
+                }
                 self.relay_h3(tcp, dpm, padding_min, stream_id, cover_traffic).await
             }
-            TunnelStream::H2 { .. } => {
+            1 => {
+                if let Some(pre) = prefix {
+                    tracing::warn!("h2 relay ignoring prefix {} bytes (unexpected)", pre.len());
+                }
                 self.relay_h2(tcp, dpm, padding_min, stream_id).await
             }
-            TunnelStream::WS(_) => {
-                self.relay_ws(tcp, dpm, padding_min, stream_id).await
+            2 => {
+                self.relay_ws(tcp, dpm, padding_min, stream_id, prefix).await
             }
-            TunnelStream::Consumed => Err("tunnel already consumed".into()),
+            _ => Err("tunnel already consumed".into()),
         }
     }
 
@@ -615,6 +823,7 @@ impl Tunnel {
         dpm: DpmParams,
         padding_min: usize,
         stream_id: u64,
+        prefix: Option<&[u8]>,
     ) -> Result<(), String> {
         // Take ownership of the WS stream
         let ws = {
@@ -627,11 +836,32 @@ impl Tunnel {
         };
 
         let (tcp_read, mut tcp_write) = tcp.into_split();
-        let ws = Arc::new(AsyncMutex::new(ws));
-        let ws_reader = ws.clone();
-        let ws_writer = ws.clone();
+
+        // Split WS stream into independent read/write halves to avoid lock contention
+        let (ws_sink, ws_stream) = ws.split();
+        let ws_reader = Arc::new(AsyncMutex::new(ws_stream));
+        let ws_writer = Arc::new(AsyncMutex::new(ws_sink));
+
+        // Send prefix data (leftover from SOCKS5 read) through WS first
+        // Format: [0x06][actual data]
+        if let Some(pre) = prefix {
+            if !pre.is_empty() {
+                tracing::debug!("tcp→ws: sending prefix {} bytes", pre.len());
+                let mut frame = Vec::with_capacity(1 + pre.len());
+                frame.push(FRAME_DATA);
+                frame.extend_from_slice(pre);
+                let mut locked = ws_writer.lock().await;
+                locked.send(tungstenite::Message::Binary(frame.into()))
+                    .await
+                    .map_err(|e| format!("ws send prefix: {}", e))?;
+            }
+        }
+
+        tracing::info!("ws relay started");
         let bandwidth_down = self.bandwidth.clone();
         let bandwidth_up = self.bandwidth.clone();
+        let stats_down = self.stats.clone();
+        let stats_up = self.stats.clone();
         let entropy = self.entropy.clone();
         let logger_down = self.logger.clone();
         let logger_up = self.logger.clone();
@@ -642,19 +872,17 @@ impl Tunnel {
         let ws_to_tcp = tokio::spawn(async move {
             let mut seq: u32 = 0;
             loop {
-                let msg = {
-                    let mut locked = ws_reader.lock().await;
-                    locked.next().await
-                };
+                let msg = ws_reader.lock().await.next().await;
                 match msg {
                     Some(Ok(tungstenite::Message::Binary(data))) => {
                         if data.len() < 1 { break; }
                         match data[0] {
                             FRAME_DATA => {
-                                if data.len() < 2 { continue; }
-                                let payload = &data[1..];
-                                let actual_len = payload.len().saturating_sub(padding_min);
-                                let actual_data = &payload[..actual_len.min(payload.len())];
+                                // Format: [0x06][2-byte length BE][data][padding]
+                                if data.len() < 3 { continue; }
+                                let actual_len = u16::from_be_bytes([data[1], data[2]]) as usize;
+                                if actual_len > data.len() - 3 { continue; }
+                                let actual_data = &data[3..3 + actual_len];
 
                                 let sleep_dur = {
                                     let bw = bandwidth_down.lock();
@@ -669,6 +897,7 @@ impl Tunnel {
                                     let mut s = session_down.lock();
                                     s.streams.get_mut(stream_id).map(|r| r.record_in(actual_len));
                                 }
+                                stats_down.add_down(actual_len as u64);
                                 logger_down.record_data_in(stream_id as u16, seq, actual_len, None);
                                 seq += 1;
 
@@ -693,10 +922,11 @@ impl Tunnel {
         let mut buf = [0u8; 8192];
 
         loop {
-            let n = match tcp_read.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(_) => break,
+            let n = match tokio::time::timeout(Duration::from_secs(15), tcp_read.read(&mut buf)).await {
+                Ok(Ok(0)) => { tracing::info!("ws relay: TCP EOF"); break; }
+                Ok(Ok(n)) => { tracing::debug!("ws relay: TCP read {} bytes", n); n }
+                Ok(Err(e)) => { tracing::warn!("ws relay: TCP read error: {}", e); break; }
+                Err(_) => { tracing::warn!("ws relay: TCP read timeout"); break; }
             };
 
             let sleep_dur = {
@@ -711,27 +941,16 @@ impl Tunnel {
             let jitter = dpm.jitter_us(&mut rng);
             if jitter > 0 { tokio::time::sleep(Duration::from_micros(jitter)).await; }
 
-            let padding_len = dpm.padding_for(n, &mut rng);
-            let entropy_pad = {
-                let eg = entropy.lock();
-                let profile = eg.active_profile(&dpm);
-                eg.padding_for(profile, n + padding_len, &dpm, &mut rng)
-            };
-
-            let pad_total = padding_len + entropy_pad;
-            let mut frame = Vec::with_capacity(1 + n + pad_total);
+            // TCP -> WS: send [0x06][actual data], no padding
+            let mut frame = Vec::with_capacity(1 + n);
             frame.push(FRAME_DATA);
             frame.extend_from_slice(&buf[..n]);
-            if pad_total > 0 {
-                let mut pb = vec![0u8; pad_total];
-                rand::Rng::fill(&mut rng, &mut pb[..]);
-                frame.extend_from_slice(&pb);
-            }
 
             {
                 let mut s = session_up.lock();
                 s.streams.get_mut(stream_id).map(|r| r.record_out(n));
             }
+            stats_up.add_up(n as u64);
             logger_up.record_data_out(stream_id as u16, seq, n, 0, None);
             seq += 1;
 
@@ -746,7 +965,7 @@ impl Tunnel {
             let mut locked = ws_writer.lock().await;
             let close_frame = vec![FRAME_CLOSE];
             let _ = locked.send(tungstenite::Message::Binary(close_frame.into())).await;
-            let _ = locked.close(None).await;
+            let _ = locked.close().await;
         }
 
         let _ = ws_to_tcp.await;
@@ -1047,7 +1266,7 @@ impl Tunnel {
 }
 
 #[derive(Debug)]
-struct NoVerify;
+pub struct NoVerify;
 
 impl rustls::client::danger::ServerCertVerifier for NoVerify {
     fn verify_server_cert(

@@ -1,8 +1,10 @@
 mod commands;
+mod system_proxy;
 
 use commands::ProxyState;
 use parking_lot::Mutex;
 use std::sync::Arc;
+use system_proxy::SystemProxyManager;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -35,12 +37,14 @@ fn apply_rounded_corners(hwnd: isize) {
 
 pub struct AppState {
     pub proxy: Arc<Mutex<ProxyState>>,
+    pub sys_proxy: Arc<Mutex<SystemProxyManager>>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
             proxy: Arc::new(Mutex::new(ProxyState::default())),
+            sys_proxy: Arc::new(Mutex::new(SystemProxyManager::new())),
         }
     }
 }
@@ -57,6 +61,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::connect,
@@ -66,6 +71,8 @@ pub fn run() {
             commands::update_config,
             commands::get_status,
             commands::generate_psk,
+            commands::refresh_ech,
+            commands::get_connection_logs,
         ])
         .setup(|app| {
             let _handle = app.handle().clone();

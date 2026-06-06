@@ -276,7 +276,7 @@ export default function App() {
           className="scroll-thin"
           style={{
             flex: 1, overflowY: "auto",
-            padding: "28px 32px",
+            padding: "28px 32px 48px",
             background: "var(--bg)",
             display: "flex",
             flexDirection: "column",

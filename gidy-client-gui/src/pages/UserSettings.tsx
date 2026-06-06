@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { open } from "@tauri-apps/plugin-dialog";
 import { getConfig, updateConfig, GuiConfig } from "../api";
 
 const GITHUB_REPO = "yokeay/gidy-client";
@@ -97,15 +98,15 @@ type UpdateState =
   | { status: "available"; current: string; latest: string; url: string }
   | { status: "error"; message: string };
 
-export default function UserSettings({ theme, themeColor }: UserSettingsProps) {
+export default function UserSettings(_props: UserSettingsProps) {
   const { i18n } = useTranslation();
   const [config, setConfig] = useState<GuiConfig | null>(null);
-  const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
   const [kernelPath, setKernelPath] = useState("/usr/local/bin/gidy-core");
   const [activeSection, setActiveSection] = useState("general");
   const contentRef = useRef<HTMLDivElement>(null);
   const [updateState, setUpdateState] = useState<UpdateState>({ status: "idle" });
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     getConfig().then(c => {
@@ -113,20 +114,35 @@ export default function UserSettings({ theme, themeColor }: UserSettingsProps) {
     }).catch(() => {});
   }, []);
 
-  const toggle = (key: keyof GuiConfig) => {
+  // Auto-save: whenever config changes, debounce 600ms then save
+  useEffect(() => {
+    if (!config) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await updateConfig(config);
+        setSavedMsg(true);
+        setTimeout(() => setSavedMsg(false), 1800);
+      } catch {}
+    }, 600);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [config]);
+
+  const updateField = useCallback((key: keyof GuiConfig, value: string | number | boolean) => {
+    if (!config) return;
+    setConfig({ ...config, [key]: value });
+  }, [config]);
+
+  const toggle = useCallback((key: keyof GuiConfig) => {
     if (!config) return;
     setConfig({ ...config, [key]: !config[key] });
-  };
+  }, [config]);
 
-  const handleSave = async () => {
-    if (!config) return;
-    setSaving(true);
+  const handleBrowseKernel = async () => {
     try {
-      await updateConfig({ ...config, theme, theme_color: themeColor });
-      setSavedMsg(true);
-      setTimeout(() => setSavedMsg(false), 2000);
+      const selected = await open({ directory: false, multiple: false, title: "选择内核文件" });
+      if (selected) setKernelPath(selected as string);
     } catch {}
-    setSaving(false);
   };
 
   const scrollTo = (id: string) => {
@@ -224,7 +240,7 @@ export default function UserSettings({ theme, themeColor }: UserSettingsProps) {
                 <input
                   type="number"
                   value={config.log_retention_days}
-                  onChange={e => setConfig({ ...config, log_retention_days: parseInt(e.target.value) || 7 })}
+                  onChange={e => updateField("log_retention_days", parseInt(e.target.value) || 7)}
                   style={{
                     width: 60, padding: "6px 8px", textAlign: "center",
                     background: "var(--muted)", border: "1px solid var(--border)",
@@ -256,7 +272,7 @@ export default function UserSettings({ theme, themeColor }: UserSettingsProps) {
                     border: "none", outline: "none",
                   }}
                 />
-                <button style={{
+                <button onClick={handleBrowseKernel} style={{
                   padding: "7px 12px", background: "transparent",
                   border: "none", borderLeft: "1px solid var(--border)",
                   color: "var(--muted-fg)", fontSize: 12, cursor: "pointer",
@@ -275,7 +291,7 @@ export default function UserSettings({ theme, themeColor }: UserSettingsProps) {
                 {["global", "pac"].map(m => (
                   <button
                     key={m}
-                    onClick={() => setConfig({ ...config, mode: m })}
+                    onClick={() => updateField("mode", m)}
                     style={{
                       padding: "7px 16px", borderRadius: 7, fontSize: 12, fontWeight: 500,
                       cursor: "pointer", fontFamily: "var(--font-ui)",
@@ -406,13 +422,12 @@ export default function UserSettings({ theme, themeColor }: UserSettingsProps) {
           </div>
         </SectionBlock>
 
-        {/* Save bar */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 16, paddingBottom: 24 }}>
-          {savedMsg && <span style={{ fontSize: 12, color: "var(--accent-green)" }}>✓ 已保存</span>}
-          <GreenBtn onClick={handleSave} disabled={saving}>
-            {saving ? "保存中..." : "保存配置"}
-          </GreenBtn>
-        </div>
+        {/* Auto-save indicator */}
+        {savedMsg && (
+          <div style={{ textAlign: "right", paddingBottom: 16, fontSize: 12, color: "var(--accent-green)" }}>
+            ✓ 已自动保存
+          </div>
+        )}
       </div>
     </div>
   );

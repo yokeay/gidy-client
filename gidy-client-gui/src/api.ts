@@ -20,6 +20,9 @@ export interface GuiConfig {
   server_addr: string;
   server_port: number;
   server_name: string;
+  ws_url: string;
+  ech_config_base64: string;
+  ech_token: string;
   socks5_addr: string;
   socks5_port: number;
   http_addr: string;
@@ -61,6 +64,20 @@ export async function getStatus(): Promise<ProxyStatus> {
 
 export async function generatePsk(): Promise<string> {
   return invoke<string>("generate_psk");
+}
+
+export async function refreshEch(): Promise<string> {
+  return invoke<string>("refresh_ech");
+}
+
+export interface ConnectionLogEntry {
+  target: string;
+  protocol: string;
+  connected_at: string;
+}
+
+export async function getConnectionLogs(): Promise<ConnectionLogEntry[]> {
+  return invoke<ConnectionLogEntry[]>("get_connection_logs");
 }
 
 export function formatBytes(bytes: number): string {
