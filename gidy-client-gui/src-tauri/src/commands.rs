@@ -27,9 +27,9 @@ mod proxy_state {
                 connected: false,
                 error: None,
                 config: super::ClientConfig {
-                    psk_hex: String::new(),
-                    server_addr: "49.12.243.33:4434".into(),
-                    server_name: "localhost".into(),
+                    psk_hex: "4f3915417e21b4d3c54bb378c1fc66657b7a02626e688198438ad7a12b58270a".into(),
+                    server_addr: "gidy.eu.cc:443".into(),
+                    server_name: "gidy.eu.cc".into(),
                     listen_addr: "127.0.0.1:1080".parse().unwrap(),
                     log_level: "info".into(),
                     bandwidth_kbps: 0,
@@ -37,6 +37,7 @@ mod proxy_state {
                     log_dir: None,
                     keychain_path: None,
                     cover_traffic: false,
+                    protocol: "h2".into(),
                 },
                 stats: super::TrafficStats::new(),
                 shutdown_tx: None,
@@ -70,15 +71,15 @@ pub struct GuiConfig {
 impl Default for GuiConfig {
     fn default() -> Self {
         Self {
-            psk_hex: String::new(),
-            server_addr: "49.12.243.33".into(),
-            server_port: 4434,
-            server_name: "localhost".into(),
+            psk_hex: "4f3915417e21b4d3c54bb378c1fc66657b7a02626e688198438ad7a12b58270a".into(),
+            server_addr: "gidy.eu.cc".into(),
+            server_port: 443,
+            server_name: "gidy.eu.cc".into(),
             socks5_addr: "127.0.0.1".into(),
             socks5_port: 1080,
             http_addr: "127.0.0.1".into(),
             http_port: 8080,
-            protocol: "quic".into(),
+            protocol: "h2".into(),
             mode: "global".into(),
             auto_start: false,
             auto_connect: false,
@@ -212,7 +213,7 @@ pub async fn get_config(state: tauri::State<'_, AppState>) -> Result<GuiConfig, 
         socks5_port: cfg.listen_addr.port(),
         http_addr: "127.0.0.1".into(),
         http_port: 8080,
-        protocol: "quic".into(),
+        protocol: cfg.protocol.clone(),
         mode: "global".into(),
         auto_start: false,
         auto_connect: false,
@@ -252,6 +253,7 @@ pub async fn update_config(
         log_dir: None,
         keychain_path: None,
         cover_traffic: false,
+        protocol: config.protocol.clone(),
     };
 
     Ok(config)

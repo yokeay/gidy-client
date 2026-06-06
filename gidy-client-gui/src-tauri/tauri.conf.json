@@ -13,13 +13,14 @@
     "windows": [
       {
         "title": "gidy client",
-        "width": 1100,
-        "height": 720,
+        "width": 980,
+        "height": 640,
         "minWidth": 980,
         "minHeight": 640,
-        "resizable": true,
+        "resizable": false,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
+        "backgroundColor": "#00000000",
         "center": true
       }
     ],

@@ -30,12 +30,16 @@ pub struct ClientConfig {
 
     #[serde(default)]
     pub cover_traffic: bool,
+
+    #[serde(default = "default_protocol")]
+    pub protocol: String,
 }
 
-fn default_server_addr() -> String { "127.0.0.1:443".into() }
+fn default_protocol() -> String { "h2".into() }
+fn default_server_addr() -> String { "gidy.eu.cc:443".into() }
 fn default_listen_addr() -> SocketAddr { "127.0.0.1:1080".parse().unwrap() }
 fn default_log_level() -> String { "info".into() }
-fn default_server_name() -> String { "gidy.example.com".into() }
+fn default_server_name() -> String { "gidy.eu.cc".into() }
 fn default_log_level_gidy() -> String { "basic".into() }
 
 impl ClientConfig {
@@ -64,7 +68,7 @@ impl ClientConfig {
 
 pub fn generate_default_config() -> ClientConfig {
     ClientConfig {
-        psk_hex: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+        psk_hex: "4f3915417e21b4d3c54bb378c1fc66657b7a02626e688198438ad7a12b58270a".into(),
         server_addr: default_server_addr(),
         listen_addr: default_listen_addr(),
         log_level: default_log_level(),
@@ -74,5 +78,6 @@ pub fn generate_default_config() -> ClientConfig {
         log_dir: None,
         keychain_path: None,
         cover_traffic: false,
+        protocol: default_protocol(),
     }
 }

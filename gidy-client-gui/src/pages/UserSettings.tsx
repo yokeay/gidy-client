@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { getConfig, updateConfig, GuiConfig } from "../api";
 
+const GITHUB_REPO = "yokeay/gidy-client";
+
 interface UserSettingsProps {
   theme: "light" | "dark";
   themeColor: string;
@@ -9,7 +11,7 @@ interface UserSettingsProps {
   onThemeColorChange: (c: string) => void;
 }
 
-const APP_VERSION = "v0.2.9";
+const APP_VERSION = "v0.3.0";
 
 const SECTIONS = [
   { id: "general",  label: "基本设置" },
@@ -88,6 +90,13 @@ function GreenBtn({ onClick, children, disabled }: { onClick?: () => void; child
   );
 }
 
+type UpdateState =
+  | { status: "idle" }
+  | { status: "checking" }
+  | { status: "latest"; version: string }
+  | { status: "available"; current: string; latest: string; url: string }
+  | { status: "error"; message: string };
+
 export default function UserSettings({ theme, themeColor }: UserSettingsProps) {
   const { i18n } = useTranslation();
   const [config, setConfig] = useState<GuiConfig | null>(null);
@@ -96,6 +105,7 @@ export default function UserSettings({ theme, themeColor }: UserSettingsProps) {
   const [kernelPath, setKernelPath] = useState("/usr/local/bin/gidy-core");
   const [activeSection, setActiveSection] = useState("general");
   const contentRef = useRef<HTMLDivElement>(null);
+  const [updateState, setUpdateState] = useState<UpdateState>({ status: "idle" });
 
   useEffect(() => {
     getConfig().then(c => {
@@ -123,6 +133,26 @@ export default function UserSettings({ theme, themeColor }: UserSettingsProps) {
     setActiveSection(id);
     const el = contentRef.current?.querySelector(`#${id}`);
     el?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const checkUpdate = async () => {
+    setUpdateState({ status: "checking" });
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
+        { headers: { Accept: "application/vnd.github+json" } }
+      );
+      if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+      const data = await res.json() as { tag_name: string; html_url: string };
+      const latest = data.tag_name;
+      if (latest === APP_VERSION || latest === APP_VERSION.replace(/^v/, "").replace(/^/, "v")) {
+        setUpdateState({ status: "latest", version: latest });
+      } else {
+        setUpdateState({ status: "available", current: APP_VERSION, latest, url: data.html_url });
+      }
+    } catch (e) {
+      setUpdateState({ status: "error", message: String(e) });
+    }
   };
 
   if (!config) return null;
@@ -268,7 +298,36 @@ export default function UserSettings({ theme, themeColor }: UserSettingsProps) {
           <Row
             label="当前版本"
             sub={APP_VERSION}
-            right={<GreenBtn>检查更新</GreenBtn>}
+            right={
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                <GreenBtn onClick={checkUpdate} disabled={updateState.status === "checking"}>
+                  {updateState.status === "checking" ? "检查中..." : "检查更新"}
+                </GreenBtn>
+                {updateState.status === "latest" && (
+                  <span style={{ fontSize: 12, color: "var(--accent-green)" }}>
+                    ✓ 已是最新版本 {updateState.version}
+                  </span>
+                )}
+                {updateState.status === "available" && (
+                  <span style={{ fontSize: 12, color: "#f39c12" }}>
+                    发现新版本 {updateState.latest}，{" "}
+                    <a
+                      href={updateState.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "var(--accent-blue)", textDecoration: "none" }}
+                    >
+                      前往下载 ↗
+                    </a>
+                  </span>
+                )}
+                {updateState.status === "error" && (
+                  <span style={{ fontSize: 12, color: "#e74c3c" }}>
+                    检查失败，请重试
+                  </span>
+                )}
+              </div>
+            }
           />
         </SectionBlock>
 

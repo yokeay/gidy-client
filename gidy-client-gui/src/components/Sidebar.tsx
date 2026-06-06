@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { LayoutDashboard, Settings2, BarChart3, ScrollText, Settings } from "lucide-react";
 import { getStatus, getStats, formatUptime } from "../api";
 
 interface SidebarProps {
@@ -7,16 +9,18 @@ interface SidebarProps {
   currentLang?: "zh" | "en";
 }
 
-const NAV_ITEMS = [
-  { path: "/dashboard", icon: "⚙", label: "系统配置" },
-  { path: "/traffic-monitor", icon: "◈", label: "流量监测" },
-  { path: "/logs", icon: "≡", label: "系统日志" },
-];
-
 export default function Sidebar({ currentPath }: SidebarProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [running, setRunning] = useState(false);
   const [uptime, setUptime] = useState(0);
+
+  const NAV_ITEMS = [
+    { path: "/dashboard", icon: <LayoutDashboard size={16} />, label: t("nav.overview") },
+    { path: "/proxy-config", icon: <Settings2 size={16} />, label: t("nav.config") },
+    { path: "/traffic-monitor", icon: <BarChart3 size={16} />, label: t("nav.trafficMonitor") },
+    { path: "/logs", icon: <ScrollText size={16} />, label: t("nav.logs") },
+  ];
 
   useEffect(() => {
     const poll = async () => {
@@ -36,7 +40,8 @@ export default function Sidebar({ currentPath }: SidebarProps) {
       ? currentPath === "/" || currentPath === "/dashboard"
       : currentPath === path;
 
-  const NavItem = ({ path, icon, label }: { path: string; icon: string; label: string }) => {
+  const NavItem = ({ path, icon, label }: { path: string; icon: React.ReactNode; label: string }) => {
+
     const active = isActive(path);
     return (
       <div
@@ -72,7 +77,7 @@ export default function Sidebar({ currentPath }: SidebarProps) {
           }
         }}
       >
-        <span style={{ fontSize: 16 }}>{icon}</span>
+        <span style={{ display: "flex", alignItems: "center" }}>{icon}</span>
         <span>{label}</span>
       </div>
     );
@@ -133,16 +138,16 @@ export default function Sidebar({ currentPath }: SidebarProps) {
             }
           }}
         >
-          <span style={{ fontSize: 16 }}>⚙</span>
-          <span>设置</span>
+          <span style={{ display: "flex", alignItems: "center" }}><Settings size={16} /></span>
+          <span>{t("sidebar.settings")}</span>
         </div>
 
         {/* Divider */}
         <div style={{ height: 1, background: "var(--border)", margin: "10px 4px 12px" }} />
 
         {/* Connection status */}
-        <div style={{ padding: "0 12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+        <div style={{ padding: "0 12px", textAlign: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginBottom: 4 }}>
             <div
               className={running ? "pulse-dot" : ""}
               style={{
@@ -161,14 +166,14 @@ export default function Sidebar({ currentPath }: SidebarProps) {
                 color: running ? "var(--accent-green)" : "var(--muted-fg)",
               }}
             >
-              {running ? "连接正常" : "未连接"}
+              {running ? t("sidebar.connected") : t("sidebar.disconnected")}
             </span>
           </div>
           <div
             className="tabular"
-            style={{ fontSize: 11, color: "var(--text-muted,#4a5268)" }}
+            style={{ fontSize: 11, color: "var(--text-muted,#4a5268)", textAlign: "center" }}
           >
-            运行时长 {formatUptime(uptime)}
+            {t("sidebar.uptime")} {formatUptime(uptime)}
           </div>
         </div>
       </div>

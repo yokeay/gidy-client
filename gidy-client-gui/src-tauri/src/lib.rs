@@ -10,6 +10,29 @@ use tauri::{
     Emitter, Manager,
 };
 
+#[cfg(target_os = "windows")]
+fn apply_rounded_corners(hwnd: isize) {
+    // DwmSetWindowAttribute: DWMWA_WINDOW_CORNER_PREFERENCE=33, DWMWCP_ROUND=2
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: isize,
+            attr: u32,
+            pv_attr: *const core::ffi::c_void,
+            cb_attr: u32,
+        ) -> i32;
+    }
+    unsafe {
+        let pref: u32 = 2; // DWMWCP_ROUND
+        DwmSetWindowAttribute(
+            hwnd,
+            33, // DWMWA_WINDOW_CORNER_PREFERENCE
+            &pref as *const u32 as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
+
 pub struct AppState {
     pub proxy: Arc<Mutex<ProxyState>>,
 }
@@ -47,6 +70,18 @@ pub fn run() {
         .setup(|app| {
             let _handle = app.handle().clone();
 
+            // Set WebView2 background to fully transparent so CSS border-radius works
+            if let Some(win) = app.get_webview_window("main") {
+                // rgba(0,0,0,0) — fully transparent
+                let _ = win.set_background_color(Some((0_u8, 0_u8, 0_u8, 0_u8).into()));
+
+                // Apply rounded corners via DWM on Windows 11+
+                #[cfg(target_os = "windows")]
+                if let Ok(hwnd) = win.hwnd() {
+                    apply_rounded_corners(hwnd.0 as *mut _ as isize);
+                }
+            }
+
             // Build tray menu
             let show_item = MenuItem::with_id(app, "show", "回主界面", true, None::<&str>)?;
             let toggle_item = MenuItem::with_id(app, "toggle", "断开连接", true, None::<&str>)?;
@@ -75,9 +110,8 @@ pub fn run() {
                             let _ = app.emit("tray-toggle-connection", ());
                         }
                         "quit" => {
-                            // Emit quit event so frontend can clean up
-                            let _ = app.emit("tray-quit", ());
-                            std::process::exit(0);
+                            // Directly exit the process from tray menu
+                            app.exit(0);
                         }
                         _ => {}
                     }

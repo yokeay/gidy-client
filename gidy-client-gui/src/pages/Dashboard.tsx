@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { Power } from "lucide-react";
 import {
   getStats,
   getStatus,
+  getConfig,
   connect,
   disconnect,
   formatUptime,
@@ -19,6 +21,7 @@ export default function Dashboard() {
   });
   const [loading, setLoading] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [protocol, setProtocol] = useState("quic");
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const refreshStats = useCallback(async () => {
@@ -27,6 +30,10 @@ export default function Dashboard() {
       setStats(s);
       setStatus(st);
     } catch {}
+  }, []);
+
+  useEffect(() => {
+    getConfig().then(cfg => setProtocol(cfg.protocol)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -97,15 +104,12 @@ export default function Dashboard() {
             justifyContent: "center",
           }}
         >
-          <span
-            style={{
-              fontSize: 36,
-              color: isRunning ? "rgba(255,255,255,0.9)" : "var(--muted-fg)",
-              textShadow: isRunning ? "0 0 20px rgba(255,255,255,0.5)" : "none",
-            }}
-          >
-            ⏻
-          </span>
+          <Power
+            size={44}
+            strokeWidth={2}
+            color={isRunning ? "rgba(255,255,255,0.9)" : "var(--muted-fg)"}
+            style={{ filter: isRunning ? "drop-shadow(0 0 12px rgba(255,255,255,0.5))" : "none" }}
+          />
         </button>
       </div>
 
@@ -152,20 +156,21 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Quick stats */}
+      {/* Quick stats — 4 cards in one row */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 12,
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: 10,
           width: "100%",
-          maxWidth: 480,
+          maxWidth: 560,
         }}
       >
         {[
           { label: t("dashboard.uploadSpeed"), value: `${stats.speed_up_kbps.toFixed(1)} Kbps`, color: "var(--accent-green)" },
           { label: t("dashboard.downloadSpeed"), value: `${stats.speed_down_kbps.toFixed(1)} Kbps`, color: "var(--accent-blue)" },
           { label: t("dashboard.proxyConnections"), value: String(stats.active_connections), color: "var(--fg)" },
+          { label: t("dashboard.proxyProtocol"), value: protocol.toUpperCase(), color: "var(--fg)" },
         ].map((card, i) => (
           <div
             key={i}
@@ -173,18 +178,18 @@ export default function Dashboard() {
               background: "var(--card)",
               border: "1px solid var(--border)",
               borderRadius: 10,
-              padding: 16,
+              padding: "14px 12px",
               display: "flex",
               flexDirection: "column",
               gap: 6,
             }}
           >
-            <div style={{ fontSize: 11, color: "var(--text-muted, #4a5268)", letterSpacing: "0.06em" }}>
+            <div style={{ fontSize: 10, color: "var(--text-muted, #4a5268)", letterSpacing: "0.06em" }}>
               {card.label}
             </div>
             <div
               className="tabular"
-              style={{ fontSize: 18, fontWeight: 600, color: card.color, lineHeight: 1 }}
+              style={{ fontSize: 16, fontWeight: 600, color: card.color, lineHeight: 1 }}
             >
               {card.value}
             </div>

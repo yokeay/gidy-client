@@ -6,14 +6,22 @@ import { listen } from "@tauri-apps/api/event";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
 import SystemConfig from "./pages/SystemConfig";
+import ProxyConfig from "./pages/ProxyConfig";
 import TrafficMonitor from "./pages/TrafficMonitor";
 import UserSettings from "./pages/UserSettings";
 import LogViewer from "./pages/LogViewer";
 
-const APP_VERSION = "v0.2.9";
+const APP_VERSION = "v0.3.0";
 
 // ── Close Confirm Dialog ──────────────────────────────────────────────────────
-function CloseDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+function CloseDialog({
+  onConfirm, onMinimize, onDismiss,
+}: {
+  onConfirm: () => void;
+  onMinimize: () => void;
+  onDismiss: () => void;
+}) {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -21,7 +29,7 @@ function CloseDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel:
         background: "rgba(0,0,0,0.6)", backdropFilter: "blur(6px)",
         display: "flex", alignItems: "center", justifyContent: "center",
       }}
-      onClick={onCancel}
+      onClick={onDismiss}
     >
       <div
         onClick={e => e.stopPropagation()}
@@ -42,15 +50,14 @@ function CloseDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel:
             display: "flex", alignItems: "center", justifyContent: "center",
             fontSize: 16,
           }}>⚡</div>
-          <span style={{ fontSize: 16, fontWeight: 600, color: "var(--fg)" }}>退出软件</span>
+          <span style={{ fontSize: 16, fontWeight: 600, color: "var(--fg)" }}>{t("closeDialog.title")}</span>
         </div>
         <p style={{ fontSize: 13, color: "var(--muted-fg)", lineHeight: 1.7, marginBottom: 24 }}>
-          是否彻底退出 Gidy-Client？<br />
-          选择"最小化"可保持后台运行并缩小到系统托盘。
+          {t("closeDialog.desc")}
         </p>
         <div style={{ display: "flex", gap: 10 }}>
           <button
-            onClick={onCancel}
+            onClick={onMinimize}
             style={{
               flex: 1, padding: "9px 0", borderRadius: 8,
               background: "var(--card)", border: "1px solid var(--border)",
@@ -66,7 +73,7 @@ function CloseDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel:
               (e.currentTarget as HTMLElement).style.color = "var(--muted-fg)";
             }}
           >
-            最小化到托盘
+            {t("closeDialog.minimize")}
           </button>
           <button
             onClick={onConfirm}
@@ -81,7 +88,7 @@ function CloseDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel:
             onMouseEnter={e => ((e.currentTarget as HTMLElement).style.boxShadow = "0 0 20px rgba(231,76,60,0.5)")}
             onMouseLeave={e => ((e.currentTarget as HTMLElement).style.boxShadow = "0 0 12px rgba(231,76,60,0.3)")}
           >
-            退出软件
+            {t("closeDialog.quit")}
           </button>
         </div>
       </div>
@@ -191,12 +198,13 @@ function Titlebar({ onClose }: { onClose: () => void }) {
 function PageTitle({ title }: { title: string }) {
   return (
     <div style={{ marginBottom: 28 }}>
-      <div style={{ fontSize: 20, fontWeight: 600, color: "var(--fg)", marginBottom: 6, letterSpacing: "-0.02em" }}>
+      <div style={{ fontSize: 20, fontWeight: 600, color: "var(--fg)", marginBottom: 6, letterSpacing: "-0.02em", display: "inline-block" }}>
         {title}
       </div>
       <div style={{
-        width: 24, height: 2.5, background: "var(--accent-green)",
+        height: 2.5, background: "var(--accent-green)",
         borderRadius: 2, boxShadow: "0 0 8px var(--accent-green)",
+        width: "fit-content",
       }} />
     </div>
   );
@@ -204,7 +212,7 @@ function PageTitle({ title }: { title: string }) {
 
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const location = useLocation();
   const [showCloseDialog, setShowCloseDialog] = useState(false);
 
@@ -226,8 +234,9 @@ export default function App() {
 
   const handleConfirmQuit = useCallback(async () => {
     setShowCloseDialog(false);
+    // destroy() forcefully closes the window and exits the process
     const appWindow = getCurrentWindow();
-    await appWindow.close();
+    await appWindow.destroy();
   }, []);
 
   const handleMinimizeToTray = useCallback(async () => {
@@ -236,12 +245,17 @@ export default function App() {
     await appWindow.hide();
   }, []);
 
+  const handleDismissDialog = useCallback(() => {
+    setShowCloseDialog(false);
+  }, []);
+
   const getPageTitle = () => {
     const p = location.pathname;
-    if (p === "/" || p === "/dashboard") return "系统配置";
-    if (p === "/traffic-monitor") return "流量监测";
-    if (p === "/logs") return "系统日志";
-    if (p === "/user-settings") return "设置";
+    if (p === "/" || p === "/dashboard") return t("nav.overview");
+    if (p === "/proxy-config") return t("nav.config");
+    if (p === "/traffic-monitor") return t("nav.trafficMonitor");
+    if (p === "/logs") return t("nav.logs");
+    if (p === "/user-settings") return t("nav.settings");
     return "";
   };
 
@@ -274,6 +288,7 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/system-config" element={<SystemConfig />} />
+              <Route path="/proxy-config" element={<ProxyConfig />} />
               <Route path="/traffic-monitor" element={<TrafficMonitor />} />
               <Route path="/logs" element={<LogViewer />} />
               <Route
@@ -295,7 +310,8 @@ export default function App() {
       {showCloseDialog && (
         <CloseDialog
           onConfirm={handleConfirmQuit}
-          onCancel={handleMinimizeToTray}
+          onMinimize={handleMinimizeToTray}
+          onDismiss={handleDismissDialog}
         />
       )}
     </div>

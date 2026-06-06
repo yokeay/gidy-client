@@ -1282,12 +1282,17 @@ dependencies = [
 name = "gidy-client-core"
 version = "0.2.7"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
  "bytes",
  "gidy-core",
+ "h2",
  "h3",
  "h3-quinn",
  "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "parking_lot",
  "quinn",
  "rand 0.8.6",
@@ -1295,6 +1300,7 @@ dependencies = [
  "rustls",
  "serde",
  "tokio",
+ "tokio-rustls",
  "toml 0.8.2",
  "tracing",
 ]
@@ -1485,6 +1491,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "h2"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "171fefbc92fe4a4de27e0698d6a5b392d6a0e333506bc49133760b3bcf948733"
+dependencies = [
+ "atomic-waker",
+ "bytes",
+ "fnv",
+ "futures-core",
+ "futures-sink",
+ "http",
+ "indexmap 2.14.0",
+ "slab",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "h3"
 version = "0.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1628,6 +1653,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
+ "h2",
  "http",
  "http-body",
  "httparse",
@@ -4157,6 +4183,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "tokio-rustls"
+version = "0.26.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
+dependencies = [
+ "rustls",
+ "tokio",
 ]
 
 [[package]]
