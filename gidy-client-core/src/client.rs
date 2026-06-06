@@ -2,6 +2,7 @@ use crate::config::ClientConfig;
 use crate::stats::TrafficStats;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use bytes::{Buf, Bytes};
+use futures_util::{SinkExt, StreamExt};
 use gidy_core::{
     Credentials, DpmParams, EntropyEngine, H3_ALPN, KeyChain,
     LogEvent, PSEUDO_HOST_CHECK, Session, SessionLogger, TokenBucket,
@@ -18,11 +19,24 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_rustls::TlsConnector;
+use tokio_tungstenite::{connect_async, tungstenite};
 use tracing::info;
+
+// WebSocket tunnel frame types
+const FRAME_AUTH_REQUEST: u8 = 0x01;
+const FRAME_AUTH_RESPONSE: u8 = 0x02;
+const FRAME_CONNECT: u8 = 0x03;
+const FRAME_CONNECT_OK: u8 = 0x04;
+const FRAME_CONNECT_FAIL: u8 = 0x05;
+const FRAME_DATA: u8 = 0x06;
+const FRAME_CLOSE: u8 = 0x07;
 
 type H3SendRequest = h3::client::SendRequest<h3_quinn::OpenStreams, Bytes>;
 type H3RequestStream = h3::client::RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>;
 type H2SendRequest = h2::client::SendRequest<Bytes>;
+type WsStream = tokio_tungstenite::WebSocketStream<
+    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+>;
 
 enum TunnelStream {
     H3(Arc<AsyncMutex<H3RequestStream>>),
@@ -30,6 +44,7 @@ enum TunnelStream {
         send: h2::SendStream<Bytes>,
         recv: h2::RecvStream,
     },
+    WS(WsStream),
     Consumed,
 }
 
@@ -56,7 +71,11 @@ impl GidyClient {
             .parse()
             .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
 
-        let send_request = if self.config.protocol == "h2" {
+        let transport = if self.config.protocol == "ws" {
+            info!("connecting via WebSocket to {}...", self.config.server_addr);
+            let ws = self.connect_ws().await?;
+            ConnectionTransport::WS(Arc::new(AsyncMutex::new(Some(ws))))
+        } else if self.config.protocol == "h2" {
             info!("connecting via H2 to {}...", self.config.server_addr);
             let sr = self.connect_h2().await?;
             ConnectionTransport::H2(Arc::new(AsyncMutex::new(sr)))
@@ -121,7 +140,7 @@ impl GidyClient {
         }
 
         Ok(Connection {
-            send_request,
+            transport,
             psk: self.psk,
             stats: self.stats.clone(),
             keychain: Arc::new(Mutex::new(keychain)),
@@ -133,6 +152,48 @@ impl GidyClient {
             cover_traffic: self.config.cover_traffic,
             keychain_path: self.config.keychain_path.clone(),
         })
+    }
+
+    async fn connect_ws(&self) -> Result<WsStream, String> {
+        let ws_url = self.config.server_addr.clone();
+        info!("ws: connecting to {}", ws_url);
+
+        let (ws_stream, _response) = connect_async(&ws_url)
+            .await
+            .map_err(|e| format!("WS connect: {}", e))?;
+
+        info!("ws: connected, authenticating");
+
+        // AUTH_REQUEST: 0x01 + Basic base64(gidy:PSK_HEX)
+        let psk_hex: String = self.psk.iter().map(|b| format!("{:02x}", b)).collect();
+        let auth_value = format!("Basic {}", BASE64.encode(format!("gidy:{}", psk_hex)));
+        let mut auth_frame = vec![FRAME_AUTH_REQUEST];
+        auth_frame.extend_from_slice(auth_value.as_bytes());
+
+        let mut ws = ws_stream;
+        ws.send(tungstenite::Message::Binary(auth_frame.into()))
+            .await
+            .map_err(|e| format!("ws send auth: {}", e))?;
+
+        // Wait for AUTH_RESPONSE
+        let msg = ws.next().await
+            .ok_or_else(|| "ws: connection closed before auth response".to_string())?
+            .map_err(|e| format!("ws recv auth: {}", e))?;
+
+        match msg {
+            tungstenite::Message::Binary(data) => {
+                if data.len() < 2 || data[0] != FRAME_AUTH_RESPONSE {
+                    return Err(format!("ws: unexpected auth response frame type: {:?}", data.first()));
+                }
+                if data[1] != 0x00 {
+                    return Err("ws: authentication failed".into());
+                }
+            }
+            _ => return Err("ws: unexpected non-binary auth response".into()),
+        }
+
+        info!("ws: authenticated OK");
+        Ok(ws)
     }
 
     async fn connect_quic(&self, addr: std::net::SocketAddr) -> Result<H3SendRequest, String> {
@@ -177,9 +238,6 @@ impl GidyClient {
     }
 
     async fn connect_h2(&self) -> Result<H2SendRequest, String> {
-        // Resolve server_name and build TLS config BEFORE opening TCP,
-        // so any early-return Err does not cause RST on an open socket.
-        info!("h2: resolving server_name = {:?}", self.config.server_name);
         let server_name = rustls::pki_types::ServerName::try_from(self.config.server_name.as_str())
             .map_err(|e| format!("invalid server name {:?}: {}", self.config.server_name, e))?
             .to_owned();
@@ -195,19 +253,15 @@ impl GidyClient {
         let tcp = TcpStream::connect(&self.config.server_addr)
             .await
             .map_err(|e| format!("TCP connect: {}", e))?;
-        info!("h2: TCP connected, starting TLS handshake");
 
         let tls = connector
             .connect(server_name, tcp)
             .await
             .map_err(|e| format!("TLS: {}", e))?;
-        info!("h2: TLS handshake complete, ALPN = {:?}",
-            tls.get_ref().1.alpn_protocol().map(|p| String::from_utf8_lossy(p).to_string()));
 
         let (send_request, conn) = h2::client::handshake(tls)
             .await
             .map_err(|e| format!("H2 handshake: {}", e))?;
-        info!("h2: H2 handshake complete");
 
         tokio::spawn(async move {
             if let Err(e) = conn.await {
@@ -223,10 +277,11 @@ impl GidyClient {
 enum ConnectionTransport {
     H3(Arc<AsyncMutex<H3SendRequest>>),
     H2(Arc<AsyncMutex<H2SendRequest>>),
+    WS(Arc<AsyncMutex<Option<WsStream>>>),
 }
 
 pub struct Connection {
-    send_request: ConnectionTransport,
+    transport: ConnectionTransport,
     psk: [u8; 32],
     stats: Arc<TrafficStats>,
     keychain: Arc<Mutex<KeyChain>>,
@@ -269,7 +324,7 @@ impl Connection {
 
         info!("CONNECT {}...", authority);
 
-        let tunnel_stream = match &self.send_request {
+        let tunnel_stream = match &self.transport {
             ConnectionTransport::H3(sr) => {
                 let creds = Credentials {
                     username: "gidy".to_string(),
@@ -312,8 +367,6 @@ impl Connection {
                     BASE64.encode(format!(":{}", psk_hex))
                 );
 
-                // H2 CONNECT: URI must be authority-only (RFC 7540 §8.3)
-                // No scheme or path — h2 crate enforces this and strips them for CONNECT.
                 let uri = http::Uri::builder()
                     .authority(authority.as_str())
                     .build()
@@ -329,7 +382,6 @@ impl Connection {
                     .map_err(|e| format!("build h2 request: {}", e))?;
 
                 let mut locked = sr.lock().await;
-                // send_request(req, end_of_stream=false) — must NOT set END_STREAM on CONNECT
                 let (resp_future, send_stream) = locked
                     .send_request(req, false)
                     .map_err(|e| format!("send h2 CONNECT: {}", e))?;
@@ -341,13 +393,52 @@ impl Connection {
                 }
 
                 let recv_stream = response.into_body();
-
                 TunnelStream::H2 { send: send_stream, recv: recv_stream }
+            }
+            ConnectionTransport::WS(ws_arc) => {
+                // Send CONNECT frame on the WS stream
+                let mut locked = ws_arc.lock().await;
+                let ws = locked.as_mut().ok_or_else(|| "ws: stream already taken".to_string())?;
+
+                // CONNECT frame: 0x03 + authority
+                let mut connect_frame = vec![FRAME_CONNECT];
+                connect_frame.extend_from_slice(authority.as_bytes());
+                ws.send(tungstenite::Message::Binary(connect_frame.into()))
+                    .await
+                    .map_err(|e| format!("ws send CONNECT: {}", e))?;
+
+                // Wait for CONNECT_OK or CONNECT_FAIL
+                let msg = ws.next().await
+                    .ok_or_else(|| "ws: closed before connect response".to_string())?
+                    .map_err(|e| format!("ws recv connect: {}", e))?;
+
+                match msg {
+                    tungstenite::Message::Binary(data) => {
+                        if data.is_empty() {
+                            return Err("ws: empty connect response".into());
+                        }
+                        match data[0] {
+                            FRAME_CONNECT_OK => {
+                                info!("ws CONNECT {} -> OK", authority);
+                            }
+                            FRAME_CONNECT_FAIL => {
+                                let status = data.get(1).copied().unwrap_or(0);
+                                return Err(format!("ws CONNECT denied: status 0x{:02x}", status));
+                            }
+                            _ => return Err(format!("ws: unexpected frame type: 0x{:02x}", data[0])),
+                        }
+                    }
+                    _ => return Err("ws: unexpected non-binary connect response".into()),
+                }
+
+                // Take the WS stream out of the Option and move into TunnelStream
+                let ws_stream = locked.take().ok_or_else(|| "ws: stream already taken".to_string())?;
+                TunnelStream::WS(ws_stream)
             }
         };
 
         self.stats.add_up(authority.len() as u64);
-        info!("CONNECT {} -> 200 OK", authority);
+        info!("CONNECT {} -> OK", authority);
 
         Ok(Tunnel {
             stream: Arc::new(AsyncMutex::new(tunnel_stream)),
@@ -365,7 +456,7 @@ impl Connection {
     pub async fn health_check(&self) -> Result<bool, String> {
         let psk_hex: String = self.psk.iter().map(|b| format!("{:02x}", b)).collect();
 
-        match &self.send_request {
+        match &self.transport {
             ConnectionTransport::H3(sr) => {
                 let creds = Credentials {
                     username: "gidy".to_string(),
@@ -418,6 +509,28 @@ impl Connection {
 
                 let response = resp_future.await.map_err(|e| format!("h2 health response: {}", e))?;
                 Ok(response.status() == http::StatusCode::OK)
+            }
+            ConnectionTransport::WS(ws_arc) => {
+                let mut locked = ws_arc.lock().await;
+                let ws = locked.as_mut().ok_or_else(|| "ws: stream already taken".to_string())?;
+
+                // CONNECT frame with authority = "_check"
+                let mut frame = vec![FRAME_CONNECT];
+                frame.extend_from_slice(PSEUDO_HOST_CHECK.as_bytes());
+                ws.send(tungstenite::Message::Binary(frame.into()))
+                    .await
+                    .map_err(|e| format!("ws send health: {}", e))?;
+
+                let msg = ws.next().await
+                    .ok_or_else(|| "ws: closed before health response".to_string())?
+                    .map_err(|e| format!("ws recv health: {}", e))?;
+
+                match msg {
+                    tungstenite::Message::Binary(data) if !data.is_empty() => {
+                        Ok(data[0] == FRAME_CONNECT_OK)
+                    }
+                    _ => Ok(false),
+                }
             }
         }
     }
@@ -489,8 +602,156 @@ impl Tunnel {
             TunnelStream::H2 { .. } => {
                 self.relay_h2(tcp, dpm, padding_min, stream_id).await
             }
+            TunnelStream::WS(_) => {
+                self.relay_ws(tcp, dpm, padding_min, stream_id).await
+            }
             TunnelStream::Consumed => Err("tunnel already consumed".into()),
         }
+    }
+
+    async fn relay_ws(
+        &self,
+        tcp: tokio::net::TcpStream,
+        dpm: DpmParams,
+        padding_min: usize,
+        stream_id: u64,
+    ) -> Result<(), String> {
+        // Take ownership of the WS stream
+        let ws = {
+            let mut guard = self.stream.lock().await;
+            let old = std::mem::replace(&mut *guard, TunnelStream::Consumed);
+            match old {
+                TunnelStream::WS(ws) => ws,
+                _ => return Err("expected WS tunnel stream".into()),
+            }
+        };
+
+        let (tcp_read, mut tcp_write) = tcp.into_split();
+        let ws = Arc::new(AsyncMutex::new(ws));
+        let ws_reader = ws.clone();
+        let ws_writer = ws.clone();
+        let bandwidth_down = self.bandwidth.clone();
+        let bandwidth_up = self.bandwidth.clone();
+        let entropy = self.entropy.clone();
+        let logger_down = self.logger.clone();
+        let logger_up = self.logger.clone();
+        let session_down = self.session.clone();
+        let session_up = self.session.clone();
+
+        // WS -> TCP: read DATA frames, strip padding, write to tcp
+        let ws_to_tcp = tokio::spawn(async move {
+            let mut seq: u32 = 0;
+            loop {
+                let msg = {
+                    let mut locked = ws_reader.lock().await;
+                    locked.next().await
+                };
+                match msg {
+                    Some(Ok(tungstenite::Message::Binary(data))) => {
+                        if data.len() < 1 { break; }
+                        match data[0] {
+                            FRAME_DATA => {
+                                if data.len() < 2 { continue; }
+                                let payload = &data[1..];
+                                let actual_len = payload.len().saturating_sub(padding_min);
+                                let actual_data = &payload[..actual_len.min(payload.len())];
+
+                                let sleep_dur = {
+                                    let bw = bandwidth_down.lock();
+                                    match bw.try_consume(actual_len) {
+                                        gidy_core::bwctl::ConsumeResult::Delayed(d) => Some(d),
+                                        gidy_core::bwctl::ConsumeResult::Immediate => None,
+                                    }
+                                };
+                                if let Some(d) = sleep_dur { tokio::time::sleep(d).await; }
+
+                                {
+                                    let mut s = session_down.lock();
+                                    s.streams.get_mut(stream_id).map(|r| r.record_in(actual_len));
+                                }
+                                logger_down.record_data_in(stream_id as u16, seq, actual_len, None);
+                                seq += 1;
+
+                                if tcp_write.write_all(actual_data).await.is_err() { break; }
+                            }
+                            FRAME_CLOSE => break,
+                            _ => continue,
+                        }
+                    }
+                    Some(Ok(tungstenite::Message::Close(_))) => break,
+                    Some(Ok(_)) => continue, // text/ping/pong — ignore
+                    Some(Err(e)) => { tracing::warn!("ws recv error: {}", e); break; }
+                    None => break,
+                }
+            }
+        });
+
+        // TCP -> WS: read from tcp, add DPM padding, send DATA frame
+        let mut tcp_read = tcp_read;
+        let mut rng = ChaCha20Rng::from_entropy();
+        let mut seq: u32 = 0;
+        let mut buf = [0u8; 8192];
+
+        loop {
+            let n = match tcp_read.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(_) => break,
+            };
+
+            let sleep_dur = {
+                let bw = bandwidth_up.lock();
+                match bw.try_consume(n) {
+                    gidy_core::bwctl::ConsumeResult::Delayed(d) => Some(d),
+                    gidy_core::bwctl::ConsumeResult::Immediate => None,
+                }
+            };
+            if let Some(d) = sleep_dur { tokio::time::sleep(d).await; }
+
+            let jitter = dpm.jitter_us(&mut rng);
+            if jitter > 0 { tokio::time::sleep(Duration::from_micros(jitter)).await; }
+
+            let padding_len = dpm.padding_for(n, &mut rng);
+            let entropy_pad = {
+                let eg = entropy.lock();
+                let profile = eg.active_profile(&dpm);
+                eg.padding_for(profile, n + padding_len, &dpm, &mut rng)
+            };
+
+            let pad_total = padding_len + entropy_pad;
+            let mut frame = Vec::with_capacity(1 + n + pad_total);
+            frame.push(FRAME_DATA);
+            frame.extend_from_slice(&buf[..n]);
+            if pad_total > 0 {
+                let mut pb = vec![0u8; pad_total];
+                rand::Rng::fill(&mut rng, &mut pb[..]);
+                frame.extend_from_slice(&pb);
+            }
+
+            {
+                let mut s = session_up.lock();
+                s.streams.get_mut(stream_id).map(|r| r.record_out(n));
+            }
+            logger_up.record_data_out(stream_id as u16, seq, n, 0, None);
+            seq += 1;
+
+            {
+                let mut locked = ws_writer.lock().await;
+                if locked.send(tungstenite::Message::Binary(frame.into())).await.is_err() { break; }
+            }
+        }
+
+        // Send CLOSE frame
+        {
+            let mut locked = ws_writer.lock().await;
+            let close_frame = vec![FRAME_CLOSE];
+            let _ = locked.send(tungstenite::Message::Binary(close_frame.into())).await;
+            let _ = locked.close(None).await;
+        }
+
+        let _ = ws_to_tcp.await;
+        self.log_stream_close(stream_id);
+        Ok(())
     }
 
     async fn relay_h3(
@@ -521,7 +782,7 @@ impl Tunnel {
                     let mut guard = stream_reader.lock().await;
                     match &mut *guard {
                         TunnelStream::H3(s) => s.lock().await.recv_data().await,
-                        TunnelStream::H2 { .. } | TunnelStream::Consumed => break,
+                        _ => break,
                     }
                 };
                 match data {
@@ -610,7 +871,7 @@ impl Tunnel {
                     TunnelStream::H3(s) => {
                         if s.lock().await.send_data(data).await.is_err() { break; }
                     }
-                    TunnelStream::H2 { .. } | TunnelStream::Consumed => break,
+                    _ => break,
                 }
             }
         }
@@ -642,7 +903,7 @@ impl Tunnel {
                         TunnelStream::H3(s) => {
                             if s.lock().await.send_data(data).await.is_err() { break; }
                         }
-                        TunnelStream::H2 { .. } | TunnelStream::Consumed => break,
+                        _ => break,
                     }
                 }
             });
@@ -659,7 +920,6 @@ impl Tunnel {
         padding_min: usize,
         stream_id: u64,
     ) -> Result<(), String> {
-        // Take ownership of the H2 streams by replacing with Consumed sentinel
         let (send_stream, recv_stream) = {
             let mut guard = self.stream.lock().await;
             let old = std::mem::replace(&mut *guard, TunnelStream::Consumed);
@@ -678,7 +938,6 @@ impl Tunnel {
         let session_down = self.session.clone();
         let session_up = self.session.clone();
 
-        // h2 -> TCP: read from recv_stream, strip padding, write to tcp
         let down_task = tokio::spawn(async move {
             let mut recv_stream = recv_stream;
             let mut seq: u32 = 0;
@@ -713,7 +972,6 @@ impl Tunnel {
             }
         });
 
-        // TCP -> h2: read from tcp, add DPM padding, write to send_stream
         let mut send_stream = send_stream;
         let mut tcp_read = tcp_read;
         let mut rng = ChaCha20Rng::from_entropy();

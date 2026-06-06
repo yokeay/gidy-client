@@ -1,6 +1,6 @@
 psk_hex = "4f3915417e21b4d3c54bb378c1fc66657b7a02626e688198438ad7a12b58270a"
-server_addr = "gidy.eu.cc:8443"
+server_addr = "wss://gidy.eu.cc/ws"
 server_name = "gidy.eu.cc"
 listen_addr = "127.0.0.1:1080"
-protocol = "h2"
+protocol = "ws"
 log_level = "debug"

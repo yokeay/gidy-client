@@ -35,8 +35,8 @@ pub struct ClientConfig {
     pub protocol: String,
 }
 
-fn default_protocol() -> String { "h2".into() }
-fn default_server_addr() -> String { "gidy.eu.cc:443".into() }
+fn default_protocol() -> String { "ws".into() }
+fn default_server_addr() -> String { "wss://gidy.eu.cc/ws".into() }
 fn default_listen_addr() -> SocketAddr { "127.0.0.1:1080".parse().unwrap() }
 fn default_log_level() -> String { "info".into() }
 fn default_server_name() -> String { "gidy.eu.cc".into() }
