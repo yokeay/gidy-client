@@ -69,37 +69,28 @@ jobs:
             gidy-client-cli-windows-x86_64.zip.sha256
 
   cli-macos:
-    strategy:
-      matrix:
-        include:
-          - runner: macos-13
-            target: x86_64-apple-darwin
-            suffix: macos-x86_64
-          - runner: macos-latest
-            target: aarch64-apple-darwin
-            suffix: macos-arm64
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Clone gidy-core
         run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - name: Build CLI
-        run: cargo build --release -p gidy-client-cli --target ${{ matrix.target }}
+        run: cargo build --release -p gidy-client-cli --target aarch64-apple-darwin
       - name: Package
         run: |
-          cd target/${{ matrix.target }}/release
-          tar czf ../../../gidy-client-cli-${{ matrix.suffix }}.tar.gz gidy-client
-          shasum -a 256 ../../../gidy-client-cli-${{ matrix.suffix }}.tar.gz > ../../../gidy-client-cli-${{ matrix.suffix }}.tar.gz.sha256
+          cd target/aarch64-apple-darwin/release
+          tar czf ../../../gidy-client-cli-macos-arm64.tar.gz gidy-client
+          shasum -a 256 ../../../gidy-client-cli-macos-arm64.tar.gz > ../../../gidy-client-cli-macos-arm64.tar.gz.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: cli-${{ matrix.suffix }}
+          name: cli-macos-arm64
           path: |
-            gidy-client-cli-${{ matrix.suffix }}.tar.gz
-            gidy-client-cli-${{ matrix.suffix }}.tar.gz.sha256
+            gidy-client-cli-macos-arm64.tar.gz
+            gidy-client-cli-macos-arm64.tar.gz.sha256
 
   # ═══════════════════════  GUI builds  ═══════════════════════════════
 
@@ -276,7 +267,6 @@ jobs:
           files: |
             artifacts/cli-linux-x86_64/*
             artifacts/cli-windows-x86_64/*
-            artifacts/cli-macos-x86_64/*
             artifacts/cli-macos-arm64/*
             artifacts/gui-linux/*
             artifacts/gui-windows/*
