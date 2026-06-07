@@ -12,15 +12,14 @@ env:
   CARGO_TERM_COLOR: always
 
 # ──────────────────────────────────────────────────────────────────────
-#  Release pipeline — builds CLI + GUI for macOS / Windows / Linux
-#
-#  CLI jobs  → tar.gz (Linux/macOS) or .zip (Windows)
-#  GUI jobs  → platform-native installers via Tauri
-#  release   → collect all artifacts into one GitHub Release
+#  Release pipeline
+#    Linux:   GUI (AppImage + deb) + CLI
+#    macOS:   GUI (universal dmg) + CLI (arm64)
+#    Windows: GUI (NSIS exe + MSI)    ← 只打包 GUI，不要 CLI
 # ──────────────────────────────────────────────────────────────────────
 
 jobs:
-  # ═══════════════════════  CLI builds  ═══════════════════════════════
+  # ═══════════════════════  CLI (Linux + macOS only)  ══════════════════
 
   cli-linux:
     runs-on: ubuntu-latest
@@ -43,30 +42,6 @@ jobs:
           path: |
             gidy-client-cli-linux-x86_64.tar.gz
             gidy-client-cli-linux-x86_64.tar.gz.sha256
-
-  cli-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Clone gidy-core
-        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
-        shell: bash
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build CLI
-        run: cargo build --release -p gidy-client-cli
-      - name: Package
-        shell: bash
-        run: |
-          cd target/release
-          7z a ../../gidy-client-cli-windows-x86_64.zip gidy-client.exe
-          sha256sum ../../gidy-client-cli-windows-x86_64.zip > ../../gidy-client-cli-windows-x86_64.zip.sha256
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cli-windows-x86_64
-          path: |
-            gidy-client-cli-windows-x86_64.zip
-            gidy-client-cli-windows-x86_64.zip.sha256
 
   cli-macos:
     runs-on: macos-latest
@@ -92,7 +67,7 @@ jobs:
             gidy-client-cli-macos-arm64.tar.gz
             gidy-client-cli-macos-arm64.tar.gz.sha256
 
-  # ═══════════════════════  GUI builds  ═══════════════════════════════
+  # ═══════════════════════  GUI (all 3 platforms)  ════════════════════
 
   gui-linux:
     runs-on: ubuntu-latest
@@ -174,23 +149,11 @@ jobs:
         run: npx tauri build --bundles nsis,msi
         working-directory: gidy-client-gui
         shell: bash
-
-      - name: Debug – list bundle dir
-        shell: bash
-        run: |
-          echo "=== target/release/bundle ==="
-          find gidy-client-gui/src-tauri/target/release/bundle -type f 2>/dev/null || echo "(not found, trying other paths)"
-          echo "=== target/release/*.exe ==="
-          ls -la gidy-client-gui/src-tauri/target/release/*.exe 2>/dev/null || echo "(no exe in release)"
-          # Tauri may output under src-tauri/target or workspace target
-          echo "=== workspace target/release/bundle ==="
-          find target/release/bundle -type f 2>/dev/null || echo "(not found)"
-
       - name: Collect & hash installers
         shell: bash
         run: |
           mkdir -p /tmp/gui-windows
-          # Search both possible locations
+          # Tauri output may be under workspace target/ or src-tauri/target/
           for dir in target/release/bundle gidy-client-gui/src-tauri/target/release/bundle; do
             if [ -d "$dir" ]; then
               find "$dir" -type f \( -name "*.exe" -o -name "*.msi" \) | while read f; do
@@ -201,7 +164,6 @@ jobs:
               done
             fi
           done
-          echo "=== files in /tmp/gui-windows ==="
           ls -la /tmp/gui-windows/
       - uses: actions/upload-artifact@v4
         with:
@@ -233,7 +195,6 @@ jobs:
         run: |
           sed -i '' 's|href="/|href="./|g; s|src="/|src="./|g' gidy-client-gui/dist/index.html
           sed -i '' 's| crossorigin||g' gidy-client-gui/dist/index.html
-      # Build a Universal binary (runs on both Intel and Apple Silicon Macs)
       - name: Build GUI (universal – dmg)
         run: npx tauri build --target universal-apple-darwin --bundles dmg
         working-directory: gidy-client-gui
@@ -242,8 +203,6 @@ jobs:
           mkdir -p /tmp/gui-macos
           find target/universal-apple-darwin/release/bundle -type f \( -name "*.dmg" -o -name "*.app" \) | while read f; do
             base=$(basename "$f")
-            cp "$f" /tmp/gui-macos/ 2>/dev/null || true
-            # .app is a directory — zip it
             if [ -d "$f" ]; then
               (cd "$(dirname "$f")" && zip -r /tmp/gui-macos/"$base".zip "$base")
               shasum -a 256 /tmp/gui-macos/"$base".zip > /tmp/gui-macos/"$base".zip.sha256
@@ -262,7 +221,6 @@ jobs:
   release:
     needs:
       - cli-linux
-      - cli-windows
       - cli-macos
       - gui-linux
       - gui-windows
@@ -286,7 +244,6 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/cli-linux-x86_64/*
-            artifacts/cli-windows-x86_64/*
             artifacts/cli-macos-arm64/*
             artifacts/gui-linux/*
             artifacts/gui-windows/*
