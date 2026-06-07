@@ -130,13 +130,13 @@ impl SystemProxyManager {
         for svc in &services {
             // HTTP proxy
             let _ = Self::run_networksetup(&[
-                "-setwebproxy", svc, host, &port.to_string(), &"0".to_string(),
+                "-setwebproxy", svc, host, &port.to_string(), "0",
             ]);
             let _ = Self::run_networksetup(&["-setwebproxystate", svc, "on"]);
 
             // HTTPS proxy
             let _ = Self::run_networksetup(&[
-                "-setsecurewebproxy", svc, host, &port.to_string(), &"0".to_string(),
+                "-setsecurewebproxy", svc, host, &port.to_string(), "0",
             ]);
             let _ = Self::run_networksetup(&["-setsecurewebproxystate", svc, "on"]);
 
