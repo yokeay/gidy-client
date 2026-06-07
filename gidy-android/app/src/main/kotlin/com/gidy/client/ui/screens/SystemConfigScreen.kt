@@ -78,6 +78,12 @@ fun SystemConfigScreen(
                 keyboard = KeyboardType.Number,
             )
             Spacer(Modifier.height(10.dp))
+            LabeledField(
+                label = "Server Name (SNI)",
+                value = draft.serverName,
+                onChange = { draft = draft.copy(serverName = it) },
+            )
+            Spacer(Modifier.height(10.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -91,7 +97,7 @@ fun SystemConfigScreen(
                 Text(
                     text = stringResource(R.string.cfg_generate_psk),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.clickable {
                         draft = draft.copy(pskHex = generatePsk())
                     },
@@ -102,6 +108,52 @@ fun SystemConfigScreen(
                 value = draft.pskHex,
                 onChange = { draft = draft.copy(pskHex = it) },
                 placeholder = stringResource(R.string.cfg_psk_hint),
+            )
+        }
+
+        // Protocol & ECH
+        AppleCard {
+            Text(
+                text = "协议 & ECH",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = "Protocol",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            SegmentedToggle(
+                options = listOf(
+                    "ws" to "WebSocket",
+                    "h2" to "H2",
+                    "h3" to "H3/QUIC",
+                ),
+                selected = draft.protocol,
+                onSelect = { draft = draft.copy(protocol = it) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(14.dp))
+            if (draft.protocol == "ws") {
+                LabeledField(
+                    label = "WS URL",
+                    value = draft.wsUrl,
+                    onChange = { draft = draft.copy(wsUrl = it) },
+                )
+                Spacer(Modifier.height(10.dp))
+            }
+            LabeledField(
+                label = "ECH Config (Base64)",
+                value = draft.echConfigBase64,
+                onChange = { draft = draft.copy(echConfigBase64 = it) },
+            )
+            Spacer(Modifier.height(10.dp))
+            LabeledField(
+                label = "ECH Token",
+                value = draft.echToken,
+                onChange = { draft = draft.copy(echToken = it) },
             )
         }
 

@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # for creating GitHub Release on tag push
+  contents: write  # for uploading to GitHub Release on tag push
 
 jobs:
   lint:
@@ -130,8 +130,9 @@ jobs:
             exit 1
           fi
           ABS_PATH="$(pwd)/$APK_PATH"
-          APK_NAME="gidy-client-${{ github.ref_name }}.apk"
+          APK_NAME="gidy-client-android-${{ github.ref_name }}.apk"
           cp "$ABS_PATH" "/tmp/$APK_NAME"
+          sha256sum "/tmp/$APK_NAME" > "/tmp/$APK_NAME.sha256"
           echo "path=/tmp/$APK_NAME" >> "$GITHUB_OUTPUT"
           echo "name=$APK_NAME" >> "$GITHUB_OUTPUT"
           ls -la "/tmp/$APK_NAME"
@@ -140,14 +141,18 @@ jobs:
         if: always()
         run: rm -f release.p12
 
-      - name: Create GitHub Release with APK
+      # Upload APK to the same release as desktop (same tag)
+      - name: Upload APK to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            /tmp/gidy-client-android-${{ github.ref_name }}.apk
+            /tmp/gidy-client-android-${{ github.ref_name }}.apk.sha256
           generate_release_notes: true
-          files: ${{ steps.apk.outputs.path }}
-          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push release notification to Feishu
         if: always()

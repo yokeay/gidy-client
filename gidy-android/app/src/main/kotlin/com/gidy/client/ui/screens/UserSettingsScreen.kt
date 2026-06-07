@@ -22,7 +22,7 @@ import com.gidy.client.ui.components.AppleSwitch
 import com.gidy.client.ui.components.SegmentedToggle
 import com.gidy.client.ui.theme.GidyMono
 
-private const val APP_VERSION = "v0.2.7"
+private const val APP_VERSION = "v0.3.2"
 
 @Composable
 fun UserSettingsScreen(

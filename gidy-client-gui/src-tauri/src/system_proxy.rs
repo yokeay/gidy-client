@@ -199,12 +199,11 @@ impl SystemProxyManager {
     #[cfg(target_os = "linux")]
     fn set_platform(&self, host: &str, port: u16) -> Result<(), String> {
         // Try GNOME gsettings first
-        let http_url = format!("http://{}:{}", host, port);
         let result = std::process::Command::new("gsettings")
             .args(["set", "org.gnome.system.proxy", "mode", "manual"])
             .output();
 
-        if let Ok(_) = result {
+        if result.is_ok() {
             let _ = std::process::Command::new("gsettings")
                 .args(["set", "org.gnome.system.proxy.http", "host", host])
                 .output();
