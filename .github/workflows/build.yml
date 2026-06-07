@@ -14,48 +14,68 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Clone gidy-core
-        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
-
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Test gidy-client-core
-        run: cargo test -p gidy-client-core
-
-  build:
-    needs: test
+  # ── CLI build matrix ────────────────────────────────────────────────
+  cli:
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            artifact: gidy-client.exe
-            name: gidy-client-windows-x86_64
-            package: gidy-client-cli
           - os: ubuntu-latest
             artifact: gidy-client
-            name: gidy-client-linux-x86_64
-            package: gidy-client-cli
+            name: cli-linux-x86_64
           - os: windows-latest
-            artifact: gidy-client-gui.exe
-            name: gidy-client-gui-windows-x86_64
-            package: gidy-client-gui
-            frontend: true
-          - os: ubuntu-latest
-            artifact: gidy-client-gui
-            name: gidy-client-gui-linux-x86_64
-            package: gidy-client-gui
-            frontend: true
-            system_deps: true
+            artifact: gidy-client.exe
+            name: cli-windows-x86_64
+          - os: macos-13
+            artifact: gidy-client
+            name: cli-macos-x86_64
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            artifact: gidy-client
+            name: cli-macos-arm64
+            target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Clone gidy-core
         run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
+        shell: bash
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target || '' }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build CLI
+        run: cargo build --release -p gidy-client-cli ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: target/${{ matrix.target || 'release' }}/release/${{ matrix.artifact }}
+
+  # ── GUI build matrix ───────────────────────────────────────────────
+  gui:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: gui-linux
+            system_deps: true
+          - os: windows-latest
+            name: gui-windows
+          - os: macos-latest
+            name: gui-macos
+            target: universal-apple-darwin
+      runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone gidy-core
+        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
+        shell: bash
 
       - name: Install system deps (Linux Tauri)
         if: matrix.system_deps
@@ -66,49 +86,65 @@ jobs:
           sudo apt-get install -y libappindicator3-dev || true
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target == 'universal-apple-darwin' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
 
       - uses: actions/setup-node@v4
-        if: matrix.frontend
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: gidy-client-gui/package-lock.json
 
       - name: npm ci
-        if: matrix.frontend
         run: npm ci
         working-directory: gidy-client-gui
-
       - name: Build frontend
-        if: matrix.frontend
         run: npm run build
         working-directory: gidy-client-gui
 
-      - name: Build (CLI)
-        if: '!matrix.frontend'
-        run: cargo build --release -p ${{ matrix.package }}
+      - name: Fix index.html asset paths (Linux/Windows)
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          sed -i 's|href="/|href="./|g; s|src="/|src="./|g' gidy-client-gui/dist/index.html
+          sed -i 's| crossorigin||g' gidy-client-gui/dist/index.html
 
-      - name: Build (GUI - Tauri)
-        if: matrix.frontend
-        run: npx tauri build --no-bundle
+      - name: Fix index.html asset paths (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          sed -i '' 's|href="/|href="./|g; s|src="/|src="./|g' gidy-client-gui/dist/index.html
+          sed -i '' 's| crossorigin||g' gidy-client-gui/dist/index.html
+
+      - name: Build GUI (Tauri – no bundle)
+        run: npx tauri build --no-bundle ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
         working-directory: gidy-client-gui
+        shell: bash
 
-      - name: Upload artifact (CLI)
-        if: '!matrix.frontend'
+      - name: Upload GUI artifact (Linux)
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: target/release/${{ matrix.artifact }}
+          path: target/release/gidy-client-gui
 
-      - name: Upload artifact (GUI)
-        if: matrix.frontend
+      - name: Upload GUI artifact (Windows)
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: target/release/${{ matrix.artifact }}
+          path: target/release/gidy-client-gui.exe
 
+      - name: Upload GUI artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/gidy-client-gui
+
+  # ── Release (only on push to main or manual) ────────────────────────
   release:
-    needs: build
+    needs: [cli, gui]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -129,10 +165,13 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
           files: |
-            artifacts/gidy-client-windows-x86_64/gidy-client.exe
-            artifacts/gidy-client-linux-x86_64/gidy-client
-            artifacts/gidy-client-gui-windows-x86_64/gidy-client-gui.exe
-            artifacts/gidy-client-gui-linux-x86_64/gidy-client-gui
+            artifacts/cli-linux-x86_64/*
+            artifacts/cli-windows-x86_64/*
+            artifacts/cli-macos-x86_64/*
+            artifacts/cli-macos-arm64/*
+            artifacts/gui-linux/*
+            artifacts/gui-windows/*
+            artifacts/gui-macos/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3,155 +3,283 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+# ──────────────────────────────────────────────────────────────────────
+#  Release pipeline — builds CLI + GUI for macOS / Windows / Linux
+#
+#  CLI jobs  → tar.gz (Linux/macOS) or .zip (Windows)
+#  GUI jobs  → platform-native installers via Tauri
+#  release   → collect all artifacts into one GitHub Release
+# ──────────────────────────────────────────────────────────────────────
 
 jobs:
-  release-linux:
+  # ═══════════════════════  CLI builds  ═══════════════════════════════
+
+  cli-linux:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-
       - name: Clone gidy-core
         run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build CLI
+        run: cargo build --release -p gidy-client-cli
+      - name: Package
+        run: |
+          cd target/release
+          tar czf ../../gidy-client-cli-linux-x86_64.tar.gz gidy-client
+          sha256sum ../../gidy-client-cli-linux-x86_64.tar.gz > ../../gidy-client-cli-linux-x86_64.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-linux-x86_64
+          path: |
+            gidy-client-cli-linux-x86_64.tar.gz
+            gidy-client-cli-linux-x86_64.tar.gz.sha256
 
+  cli-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone gidy-core
+        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
+        shell: bash
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build CLI
+        run: cargo build --release -p gidy-client-cli
+      - name: Package
+        shell: bash
+        run: |
+          cd target/release
+          7z a ../../gidy-client-cli-windows-x86_64.zip gidy-client.exe
+          sha256sum ../../gidy-client-cli-windows-x86_64.zip > ../../gidy-client-cli-windows-x86_64.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-windows-x86_64
+          path: |
+            gidy-client-cli-windows-x86_64.zip
+            gidy-client-cli-windows-x86_64.zip.sha256
+
+  cli-macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-13
+            target: x86_64-apple-darwin
+            suffix: macos-x86_64
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            suffix: macos-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone gidy-core
+        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build CLI
+        run: cargo build --release -p gidy-client-cli --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../gidy-client-cli-${{ matrix.suffix }}.tar.gz gidy-client
+          shasum -a 256 ../../../gidy-client-cli-${{ matrix.suffix }}.tar.gz > ../../../gidy-client-cli-${{ matrix.suffix }}.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.suffix }}
+          path: |
+            gidy-client-cli-${{ matrix.suffix }}.tar.gz
+            gidy-client-cli-${{ matrix.suffix }}.tar.gz.sha256
+
+  # ═══════════════════════  GUI builds  ═══════════════════════════════
+
+  gui-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone gidy-core
+        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
       - name: Install system deps (Tauri)
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libglib2.0-dev libgtk-3-dev libsoup-3.0-dev \
             libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev librsvg2-dev
           sudo apt-get install -y libappindicator3-dev || true
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: gidy-client-gui/package-lock.json
-
       - name: npm ci
         run: npm ci
         working-directory: gidy-client-gui
-
       - name: Build frontend
         run: npm run build
         working-directory: gidy-client-gui
-
-      - name: Verify & fix index.html asset paths (must be relative, no crossorigin)
+      - name: Fix index.html asset paths
         run: |
-          echo "=== dist/index.html before fix ==="
-          cat gidy-client-gui/dist/index.html
-          # Ensure relative paths
           sed -i 's|href="/|href="./|g; s|src="/|src="./|g' gidy-client-gui/dist/index.html
-          # Remove crossorigin attribute (causes CORS block under tauri:// protocol)
           sed -i 's| crossorigin||g' gidy-client-gui/dist/index.html
-          echo "=== after fix ==="
-          cat gidy-client-gui/dist/index.html
-
-      - name: Build GUI (Tauri bundle – AppImage + deb)
+      - name: Build GUI (AppImage + deb)
         run: npx tauri build --bundles appimage,deb
         working-directory: gidy-client-gui
-
-      - name: Build CLI
-        run: cargo build --release -p gidy-client-cli
-
-      - name: Package CLI
-        run: |
-          cd target/release
-          tar czf ../../gidy-client-cli-linux-x86_64.tar.gz gidy-client
-          sha256sum ../../gidy-client-cli-linux-x86_64.tar.gz > ../../gidy-client-cli-linux-x86_64.tar.gz.sha256
-
-      - name: Collect GUI bundles
-        run: |
-          find target/release/bundle -type f \( -name "*.AppImage" -o -name "*.deb" \) | while read f; do
-            cp "$f" .
-            sha256sum "$(basename $f)" > "$(basename $f).sha256"
-          done
+      - name: Collect & hash GUI bundles
         shell: bash
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+        run: |
+          mkdir -p /tmp/gui-linux
+          find target/release/bundle -type f \( -name "*.AppImage" -o -name "*.deb" \) | while read f; do
+            base=$(basename "$f")
+            cp "$f" /tmp/gui-linux/
+            sha256sum "/tmp/gui-linux/$base" > "/tmp/gui-linux/$base.sha256"
+          done
+      - uses: actions/upload-artifact@v4
         with:
-          files: |
-            gidy-client-cli-linux-x86_64.tar.gz
-            gidy-client-cli-linux-x86_64.tar.gz.sha256
-            *.AppImage
-            *.deb
-            *.AppImage.sha256
-            *.deb.sha256
-          generate_release_notes: true
+          name: gui-linux
+          path: /tmp/gui-linux/*
 
-  release-windows:
+  gui-windows:
     runs-on: windows-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-
       - name: Clone gidy-core
         run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
         shell: bash
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: gidy-client-gui/package-lock.json
-
       - name: Install WiX Toolset (for MSI)
         run: |
           choco install wixtoolset -y
           echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" >> $GITHUB_PATH
         shell: bash
-
       - name: npm ci
         run: npm ci
         working-directory: gidy-client-gui
-
       - name: Build frontend
         run: npm run build
         working-directory: gidy-client-gui
-
-      - name: Verify & fix index.html asset paths (must be relative, no crossorigin)
+      - name: Fix index.html asset paths
         shell: bash
         run: |
-          echo "=== dist/index.html before fix ==="
-          cat gidy-client-gui/dist/index.html
-          # Ensure relative paths
           sed -i 's|href="/|href="./|g; s|src="/|src="./|g' gidy-client-gui/dist/index.html
-          # Remove crossorigin attribute (causes CORS block under tauri:// protocol)
           sed -i 's| crossorigin||g' gidy-client-gui/dist/index.html
-          echo "=== after fix ==="
-          cat gidy-client-gui/dist/index.html
-
-      - name: Build GUI (Tauri bundle – NSIS + MSI)
+      - name: Build GUI (NSIS + MSI)
         run: npx tauri build --bundles nsis,msi
         working-directory: gidy-client-gui
         shell: bash
-
-      - name: Build CLI
-        run: cargo build --release -p gidy-client-cli
-
-      - name: Collect installers
-        run: |
-          find target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) | while read f; do
-            cp "$f" .
-            sha256sum "$(basename $f)" > "$(basename $f).sha256"
-          done
+      - name: Collect & hash installers
         shell: bash
+        run: |
+          mkdir -p /tmp/gui-windows
+          find target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) | while read f; do
+            base=$(basename "$f")
+            cp "$f" /tmp/gui-windows/
+            sha256sum "/tmp/gui-windows/$base" > "/tmp/gui-windows/$base.sha256"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-windows
+          path: /tmp/gui-windows/*
 
-      - name: Upload release assets
+  gui-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone gidy-core
+        run: git clone https://github.com/yokeay/gidy-core.git ../gidy-core
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: gidy-client-gui/package-lock.json
+      - name: npm ci
+        run: npm ci
+        working-directory: gidy-client-gui
+      - name: Build frontend
+        run: npm run build
+        working-directory: gidy-client-gui
+      - name: Fix index.html asset paths
+        run: |
+          sed -i '' 's|href="/|href="./|g; s|src="/|src="./|g' gidy-client-gui/dist/index.html
+          sed -i '' 's| crossorigin||g' gidy-client-gui/dist/index.html
+      # Build a Universal binary (runs on both Intel and Apple Silicon Macs)
+      - name: Build GUI (universal – dmg)
+        run: npx tauri build --target universal-apple-darwin --bundles dmg
+        working-directory: gidy-client-gui
+      - name: Collect & hash bundles
+        run: |
+          mkdir -p /tmp/gui-macos
+          find target/universal-apple-darwin/release/bundle -type f \( -name "*.dmg" -o -name "*.app" \) | while read f; do
+            base=$(basename "$f")
+            cp "$f" /tmp/gui-macos/ 2>/dev/null || true
+            # .app is a directory — zip it
+            if [ -d "$f" ]; then
+              (cd "$(dirname "$f")" && zip -r /tmp/gui-macos/"$base".zip "$base")
+              shasum -a 256 /tmp/gui-macos/"$base".zip > /tmp/gui-macos/"$base".zip.sha256
+            else
+              cp "$f" /tmp/gui-macos/
+              shasum -a 256 /tmp/gui-macos/"$base" > /tmp/gui-macos/"$base".sha256
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-macos
+          path: /tmp/gui-macos/*
+
+  # ═══════════════════════  Release  ══════════════════════════════════
+
+  release:
+    needs:
+      - cli-linux
+      - cli-windows
+      - cli-macos
+      - gui-linux
+      - gui-windows
+      - gui-macos
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            *.exe
-            *.msi
-            *.sha256
           generate_release_notes: true
+          files: |
+            artifacts/cli-linux-x86_64/*
+            artifacts/cli-windows-x86_64/*
+            artifacts/cli-macos-x86_64/*
+            artifacts/cli-macos-arm64/*
+            artifacts/gui-linux/*
+            artifacts/gui-windows/*
+            artifacts/gui-macos/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

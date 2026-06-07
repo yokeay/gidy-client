@@ -86,8 +86,7 @@ pub fn run() {
                 #[cfg(target_os = "windows")]
                 if let Ok(hwnd) = win.hwnd() {
                     apply_rounded_corners(hwnd.0 as *mut _ as isize);
-                }
-            }
+                }            }
 
             // Build tray menu
             let show_item = MenuItem::with_id(app, "show", "回主界面", true, None::<&str>)?;

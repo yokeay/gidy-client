@@ -1,14 +1,14 @@
 mod win_proxy;
 
 use clap::{Parser, Subcommand};
-use gidy_client_core::{ClientConfig, GidyClient, Socks5Server, TrafficStats};
+use gidy_client_core::{ClientConfig, GidyClient, Socks5Server, HttpProxyServer, TrafficStats, new_log_buffer};
 use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "gidy-client")]
-#[command(version = "0.1.0")]
-#[command(about = "gidy proxy client - Linux CLI", long_about = None)]
+#[command(version)]
+#[command(about = "gidy proxy client - CLI", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -16,7 +16,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start the SOCKS5 proxy
+    /// Start the SOCKS5 + HTTP proxy
     Run {
         /// Path to config file (TOML)
         #[arg(short, long, default_value = "gidy-client.toml")]
@@ -66,24 +66,15 @@ async fn main() {
 }
 
 async fn run(config: ClientConfig) -> Result<(), String> {
-
     let listen_addr = config.listen_addr.to_string();
     info!("gidy-client v{} starting", env!("CARGO_PKG_VERSION"));
     info!("server: {}", config.server_addr);
     info!("proxy listen: {}", listen_addr);
 
-    // Ctrl+C handler to clean up system proxy on exit
-    tokio::spawn(async {
-        if let Ok(()) = tokio::signal::ctrl_c().await {
-            info!("ctrl+c received, clearing system proxy...");
-            win_proxy::clear_proxy();
-            std::process::exit(0);
-        }
-    });
-
     let stats = TrafficStats::new();
+    let logs = new_log_buffer();
 
-    // Spawn stats reporter once
+    // Spawn stats reporter
     let stats_clone = stats.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
@@ -107,26 +98,68 @@ async fn run(config: ClientConfig) -> Result<(), String> {
 
         match client.connect().await {
             Ok(conn) => {
-                info!("connected, starting SOCKS5 proxy...");
+                info!("connected, starting SOCKS5 + HTTP proxy...");
 
                 // Auto-configure Windows system proxy
                 let proxy_addr = format!("socks=127.0.0.1:{}", config.listen_addr.port());
                 win_proxy::set_proxy(&proxy_addr);
 
-                let proxy = Socks5Server::new(listen_addr.clone(), conn, stats.clone());
+                let conn_arc = std::sync::Arc::new(conn);
 
-                match proxy.run().await {
-                    Err(e) => {
-                        error!("proxy error: {}", e);
-                        win_proxy::clear_proxy();
-                        info!("reconnecting in 5 seconds...");
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                // SOCKS5 server
+                let socks5 = Socks5Server::from_arc(
+                    listen_addr.clone(),
+                    conn_arc.clone(),
+                    stats.clone(),
+                    logs.clone(),
+                );
+
+                // HTTP CONNECT proxy on next port
+                let http_port = config.listen_addr.port() + 1;
+                let http_addr = format!("127.0.0.1:{}", http_port);
+                let http_proxy = HttpProxyServer::from_arc(
+                    http_addr,
+                    conn_arc,
+                    stats.clone(),
+                    logs.clone(),
+                );
+
+                let (socks5_shutdown_tx, socks5_shutdown_rx) = tokio::sync::oneshot::channel();
+                let (http_shutdown_tx, http_shutdown_rx) = tokio::sync::oneshot::channel();
+
+                // SOCKS5 task
+                let socks5_handle = tokio::spawn(async move {
+                    tokio::select! {
+                        result = socks5.run() => {
+                            if let Err(e) = result { error!("socks5 server: {}", e); }
+                        }
+                        _ = socks5_shutdown_rx => { info!("socks5 shutdown requested"); }
                     }
-                    Ok(()) => {
-                        info!("proxy stopped normally");
-                        win_proxy::clear_proxy();
+                });
+
+                // HTTP proxy task
+                let http_handle = tokio::spawn(async move {
+                    tokio::select! {
+                        result = http_proxy.run() => {
+                            if let Err(e) = result { error!("http proxy server: {}", e); }
+                        }
+                        _ = http_shutdown_rx => { info!("http proxy shutdown requested"); }
                     }
+                });
+
+                // Wait for either server to exit (indicates connection drop)
+                tokio::select! {
+                    _ = socks5_handle => { info!("socks5 server exited"); }
+                    _ = http_handle => { info!("http proxy exited"); }
                 }
+
+                // Signal remaining server to stop
+                let _ = socks5_shutdown_tx.send(());
+                let _ = http_shutdown_tx.send(());
+
+                win_proxy::clear_proxy();
+                info!("reconnecting in 5 seconds...");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
             Err(e) => {
                 error!("connection failed: {}", e);
