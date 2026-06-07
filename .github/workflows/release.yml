@@ -105,9 +105,12 @@ jobs:
         shell: bash
         run: |
           mkdir -p /tmp/gui-linux
-          BUNDLE_DIR="gidy-client-gui/src-tauri/target/release/bundle"
-          if [ ! -d "$BUNDLE_DIR" ]; then BUNDLE_DIR="target/release/bundle"; fi
-          find "$BUNDLE_DIR" -type f \( -name "*.AppImage" -o -name "*.deb" \) | while read f; do
+          find target/release/bundle -type f \( -name "*.AppImage" -o -name "*.deb" \) 2>/dev/null | while read f; do
+            base=$(basename "$f")
+            cp "$f" /tmp/gui-linux/
+            sha256sum "/tmp/gui-linux/$base" > "/tmp/gui-linux/$base.sha256"
+          done
+          find gidy-client-gui/src-tauri/target/release/bundle -type f \( -name "*.AppImage" -o -name "*.deb" \) 2>/dev/null | while read f; do
             base=$(basename "$f")
             cp "$f" /tmp/gui-linux/
             sha256sum "/tmp/gui-linux/$base" > "/tmp/gui-linux/$base.sha256"
@@ -152,24 +155,32 @@ jobs:
         working-directory: gidy-client-gui
         shell: bash
       - name: Collect & hash installers
-        shell: bash
         run: |
           mkdir -p /tmp/gui-windows
-          # npx tauri build runs inside gidy-client-gui/, so Tauri's output
-          # goes to gidy-client-gui/src-tauri/target/release/bundle/
-          BUNDLE_DIR="gidy-client-gui/src-tauri/target/release/bundle"
-          if [ ! -d "$BUNDLE_DIR" ]; then
-            BUNDLE_DIR="target/release/bundle"
-          fi
-          echo "Searching in $BUNDLE_DIR ..."
-          find "$BUNDLE_DIR" -type f \( -name "*.exe" -o -name "*.msi" \) | while read f; do
+          echo "=== searching for exe/msi ==="
+          # Use find with explicit path — on Windows runners bash find works
+          # but paths must be unix-style. Tauri workspace puts output in root target/
+          find target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) 2>/dev/null | while read f; do
             base=$(basename "$f")
             cp "$f" /tmp/gui-windows/
             sha256sum "/tmp/gui-windows/$base" > "/tmp/gui-windows/$base.sha256"
             echo "collected: $base"
           done
+          # Also check src-tauri subdirectory just in case
+          find gidy-client-gui/src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) 2>/dev/null | while read f; do
+            base=$(basename "$f")
+            cp "$f" /tmp/gui-windows/
+            sha256sum "/tmp/gui-windows/$base" > "/tmp/gui-windows/$base.sha256"
+            echo "collected: $base"
+          done
+          # Fallback: just list everything under both bundle dirs for debug
+          echo "=== target/release/bundle ==="
+          ls -R target/release/bundle/ 2>/dev/null || echo "(empty or missing)"
+          echo "=== gidy-client-gui/src-tauri/target/release/bundle ==="
+          ls -R gidy-client-gui/src-tauri/target/release/bundle/ 2>/dev/null || echo "(empty or missing)"
           echo "=== /tmp/gui-windows ==="
           ls -la /tmp/gui-windows/
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: gui-windows
@@ -206,9 +217,17 @@ jobs:
       - name: Collect & hash bundles
         run: |
           mkdir -p /tmp/gui-macos
-          BUNDLE_DIR="gidy-client-gui/src-tauri/target/universal-apple-darwin/release/bundle"
-          if [ ! -d "$BUNDLE_DIR" ]; then BUNDLE_DIR="target/universal-apple-darwin/release/bundle"; fi
-          find "$BUNDLE_DIR" -type f \( -name "*.dmg" -o -name "*.app" \) | while read f; do
+          find target/universal-apple-darwin/release/bundle -type f \( -name "*.dmg" -o -name "*.app" \) 2>/dev/null | while read f; do
+            base=$(basename "$f")
+            if [ -d "$f" ]; then
+              (cd "$(dirname "$f")" && zip -r /tmp/gui-macos/"$base".zip "$base")
+              shasum -a 256 /tmp/gui-macos/"$base".zip > /tmp/gui-macos/"$base".zip.sha256
+            else
+              cp "$f" /tmp/gui-macos/
+              shasum -a 256 /tmp/gui-macos/"$base" > /tmp/gui-macos/"$base".sha256
+            fi
+          done
+          find gidy-client-gui/src-tauri/target/universal-apple-darwin/release/bundle -type f \( -name "*.dmg" -o -name "*.app" \) 2>/dev/null | while read f; do
             base=$(basename "$f")
             if [ -d "$f" ]; then
               (cd "$(dirname "$f")" && zip -r /tmp/gui-macos/"$base".zip "$base")
