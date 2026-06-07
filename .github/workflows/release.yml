@@ -154,33 +154,31 @@ jobs:
         run: npx tauri build --bundles nsis,msi
         working-directory: gidy-client-gui
         shell: bash
+
+      - name: Find all exe/msi in workspace
+        shell: bash
+        run: |
+          echo "=== ALL .exe files ==="
+          find . -name "*.exe" -not -path "*/node_modules/*" -not -path "*/.cargo/*" 2>/dev/null
+          echo "=== ALL .msi files ==="
+          find . -name "*.msi" 2>/dev/null
+          echo "=== target/release/bundle ls -R ==="
+          ls -R target/release/bundle/ 2>/dev/null || echo "(missing)"
+          echo "=== gidy-client-gui/src-tauri/target/release/bundle ls -R ==="
+          ls -R gidy-client-gui/src-tauri/target/release/bundle/ 2>/dev/null || echo "(missing)"
+
       - name: Collect & hash installers
+        shell: bash
         run: |
           mkdir -p /tmp/gui-windows
-          echo "=== searching for exe/msi ==="
-          # Use find with explicit path — on Windows runners bash find works
-          # but paths must be unix-style. Tauri workspace puts output in root target/
-          find target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) 2>/dev/null | while read f; do
+          find . -path "*/bundle/nsis/*.exe" -o -path "*/bundle/msi/*.msi" 2>/dev/null | while read f; do
             base=$(basename "$f")
             cp "$f" /tmp/gui-windows/
             sha256sum "/tmp/gui-windows/$base" > "/tmp/gui-windows/$base.sha256"
             echo "collected: $base"
           done
-          # Also check src-tauri subdirectory just in case
-          find gidy-client-gui/src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) 2>/dev/null | while read f; do
-            base=$(basename "$f")
-            cp "$f" /tmp/gui-windows/
-            sha256sum "/tmp/gui-windows/$base" > "/tmp/gui-windows/$base.sha256"
-            echo "collected: $base"
-          done
-          # Fallback: just list everything under both bundle dirs for debug
-          echo "=== target/release/bundle ==="
-          ls -R target/release/bundle/ 2>/dev/null || echo "(empty or missing)"
-          echo "=== gidy-client-gui/src-tauri/target/release/bundle ==="
-          ls -R gidy-client-gui/src-tauri/target/release/bundle/ 2>/dev/null || echo "(empty or missing)"
           echo "=== /tmp/gui-windows ==="
           ls -la /tmp/gui-windows/
-        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: gui-windows
