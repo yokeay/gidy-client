@@ -48,7 +48,7 @@ enum TunnelStream {
         send: h2::SendStream<Bytes>,
         recv: h2::RecvStream,
     },
-    WS(WsStream),
+    WS(Box<WsStream>),
     Consumed,
 }
 
@@ -266,78 +266,70 @@ async fn establish_ws_connection(
     };
 
     // Try ECH connection, with retry on server rejection (ECH key rotation)
-    let mut ech_attempt = initial_ech;
-    // Try ECH connection, handle rejection gracefully
+    let ech_attempt = initial_ech;
 
-    let tls = loop {
-        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-        let tls_config = match ech_attempt {
-            Some(ref ec) => {
-                info!("ws: ECH enabled, outer SNI will be cloudflare-ech.com");
-                rustls::ClientConfig::builder_with_provider(provider)
-                    .with_ech(rustls::client::EchMode::Enable(ec.clone()))
-                    .map_err(|e| format!("ws: ECH config error: {}", e))?
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(NoVerify))
-                    .with_no_client_auth()
-            }
-            None => {
-                info!("ws: ECH not available, using direct SNI");
-                rustls::ClientConfig::builder_with_provider(provider)
-                    .with_protocol_versions(&[&rustls::version::TLS12, &rustls::version::TLS13])
-                    .map_err(|e| format!("ws: protocol versions error: {}", e))?
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(NoVerify))
-                    .with_no_client_auth()
-            }
-        };
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let tls_config = match ech_attempt {
+        Some(ref ec) => {
+            info!("ws: ECH enabled, outer SNI will be cloudflare-ech.com");
+            rustls::ClientConfig::builder_with_provider(provider)
+                .with_ech(rustls::client::EchMode::Enable(ec.clone()))
+                .map_err(|e| format!("ws: ECH config error: {}", e))?
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(NoVerify))
+                .with_no_client_auth()
+        }
+        None => {
+            info!("ws: ECH not available, using direct SNI");
+            rustls::ClientConfig::builder_with_provider(provider)
+                .with_protocol_versions(&[&rustls::version::TLS12, &rustls::version::TLS13])
+                .map_err(|e| format!("ws: protocol versions error: {}", e))?
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(NoVerify))
+                .with_no_client_auth()
+        }
+    };
 
-        info!("ws: TCP connecting to {}", addr);
-        let tcp = TcpStream::connect(&addr)
-            .await
-            .map_err(|e| format!("ws TCP connect: {}", e))?;
-        info!("ws: TCP connected");
+    info!("ws: TCP connecting to {}", addr);
+    let tcp = TcpStream::connect(&addr)
+        .await
+        .map_err(|e| format!("ws TCP connect: {}", e))?;
+    info!("ws: TCP connected");
 
-        let connector = TlsConnector::from(Arc::new(tls_config));
-        match connector.connect(server_name.clone(), tcp).await {
-            Ok(tls) => {
-                info!("ws: TLS handshake complete");
-                break tls;
-            }
-            Err(io_err) => {
-                // Try to extract rustls::Error from the io::Error
-                let rustls_err = io_err.get_ref()
-                    .and_then(|e| e.downcast_ref::<rustls::Error>());
+    let connector = TlsConnector::from(Arc::new(tls_config));
+    let tls = match connector.connect(server_name.clone(), tcp).await {
+        Ok(tls) => {
+            info!("ws: TLS handshake complete");
+            tls
+        }
+        Err(io_err) => {
+            // Try to extract rustls::Error from the io::Error
+            let rustls_err = io_err.get_ref()
+                .and_then(|e| e.downcast_ref::<rustls::Error>());
 
-                let retry_configs = rustls_err.and_then(|e| match e {
-                    rustls::Error::PeerIncompatible(
-                        rustls::PeerIncompatible::ServerRejectedEncryptedClientHello(rc)
-                    ) => rc.clone(),
-                    _ => None,
-                });
+            let retry_configs = rustls_err.and_then(|e| match e {
+                rustls::Error::PeerIncompatible(
+                    rustls::PeerIncompatible::ServerRejectedEncryptedClientHello(rc)
+                ) => rc.clone(),
+                _ => None,
+            });
 
-                match retry_configs {
-                    Some(configs) if !configs.is_empty() => {
-                        // ECH was rejected — the config has expired (CF rotates keys every few hours).
-                        // Do NOT fall back to no-ECH because GFW blocks the SNI.
-                        // Return a clear error so the user knows to update ech_config_base64.
-                        info!("ws: ECH rejected, server provided {} retry config(s) — config expired", configs.len());
+            match retry_configs {
+                Some(configs) if !configs.is_empty() => {
+                    info!("ws: ECH rejected, server provided {} retry config(s) — config expired", configs.len());
+                    return Err(
+                        "ECH config 已过期，请更新 ech_config_base64。\n\
+                         获取方式：在非GFW环境执行 dig HTTPS gidy.eu.cc +short，取 ech= 后的 base64 值".into()
+                    );
+                }
+                _ => {
+                    if ech_attempt.is_some() {
                         return Err(
-                            "ECH config 已过期，请更新 ech_config_base64。\n\
-                             获取方式：在非GFW环境执行 dig HTTPS gidy.eu.cc +short，取 ech= 后的 base64 值".into()
+                            "TLS 连接失败，ECH 可能已过期。请更新 ech_config_base64 后重试。\n\
+                             获取方式：在非GFW环境执行 dig HTTPS gidy.eu.cc +short".into()
                         );
-                    }
-                    _ => {
-                        // Non-ECH-rejection TLS error (e.g. GFW RST, network issue)
-                        // If we were trying with ECH, give a clear message instead of a confusing RST error
-                        if ech_attempt.is_some() {
-                            return Err(
-                                "TLS 连接失败，ECH 可能已过期。请更新 ech_config_base64 后重试。\n\
-                                 获取方式：在非GFW环境执行 dig HTTPS gidy.eu.cc +short".into()
-                            );
-                        } else {
-                            return Err(format!("ws TLS: {}", io_err));
-                        }
+                    } else {
+                        return Err(format!("ws TLS: {}", io_err));
                     }
                 }
             }
@@ -367,7 +359,7 @@ async fn establish_ws_connection(
     auth_frame.extend_from_slice(auth_value.as_bytes());
 
     let mut ws = ws_stream;
-    ws.send(tungstenite::Message::Binary(auth_frame.into()))
+    ws.send(tungstenite::Message::Binary(auth_frame))
         .await
         .map_err(|e| format!("ws send auth: {}", e))?;
 
@@ -589,7 +581,7 @@ impl Connection {
                 // CONNECT frame: 0x03 + authority
                 let mut connect_frame = vec![FRAME_CONNECT];
                 connect_frame.extend_from_slice(authority.as_bytes());
-                ws.send(tungstenite::Message::Binary(connect_frame.into()))
+                ws.send(tungstenite::Message::Binary(connect_frame))
                     .await
                     .map_err(|e| format!("ws send CONNECT: {}", e))?;
 
@@ -617,7 +609,7 @@ impl Connection {
                     _ => return Err("ws: unexpected non-binary connect response".into()),
                 }
 
-                TunnelStream::WS(ws)
+                TunnelStream::WS(Box::new(ws))
             }
         };
 
@@ -701,7 +693,7 @@ impl Connection {
                         // CONNECT frame with authority = "_check"
                         let mut frame = vec![FRAME_CONNECT];
                         frame.extend_from_slice(PSEUDO_HOST_CHECK.as_bytes());
-                        ws.send(tungstenite::Message::Binary(frame.into()))
+                        ws.send(tungstenite::Message::Binary(frame))
                             .await
                             .map_err(|e| format!("ws send health: {}", e))?;
 
@@ -821,7 +813,7 @@ impl Tunnel {
         &self,
         tcp: tokio::net::TcpStream,
         dpm: DpmParams,
-        padding_min: usize,
+        _padding_min: usize,
         stream_id: u64,
         prefix: Option<&[u8]>,
     ) -> Result<(), String> {
@@ -830,7 +822,7 @@ impl Tunnel {
             let mut guard = self.stream.lock().await;
             let old = std::mem::replace(&mut *guard, TunnelStream::Consumed);
             match old {
-                TunnelStream::WS(ws) => ws,
+                TunnelStream::WS(ws) => *ws,
                 _ => return Err("expected WS tunnel stream".into()),
             }
         };
@@ -851,7 +843,7 @@ impl Tunnel {
                 frame.push(FRAME_DATA);
                 frame.extend_from_slice(pre);
                 let mut locked = ws_writer.lock().await;
-                locked.send(tungstenite::Message::Binary(frame.into()))
+                locked.send(tungstenite::Message::Binary(frame))
                     .await
                     .map_err(|e| format!("ws send prefix: {}", e))?;
             }
@@ -862,7 +854,7 @@ impl Tunnel {
         let bandwidth_up = self.bandwidth.clone();
         let stats_down = self.stats.clone();
         let stats_up = self.stats.clone();
-        let entropy = self.entropy.clone();
+        let _entropy = self.entropy.clone();
         let logger_down = self.logger.clone();
         let logger_up = self.logger.clone();
         let session_down = self.session.clone();
@@ -875,7 +867,7 @@ impl Tunnel {
                 let msg = ws_reader.lock().await.next().await;
                 match msg {
                     Some(Ok(tungstenite::Message::Binary(data))) => {
-                        if data.len() < 1 { break; }
+                        if data.is_empty() { break; }
                         match data[0] {
                             FRAME_DATA => {
                                 // Format: [0x06][2-byte length BE][data][padding]
@@ -895,7 +887,7 @@ impl Tunnel {
 
                                 {
                                     let mut s = session_down.lock();
-                                    s.streams.get_mut(stream_id).map(|r| r.record_in(actual_len));
+                                    if let Some(r) = s.streams.get_mut(stream_id) { r.record_in(actual_len) };
                                 }
                                 stats_down.add_down(actual_len as u64);
                                 logger_down.record_data_in(stream_id as u16, seq, actual_len, None);
@@ -948,7 +940,7 @@ impl Tunnel {
 
             {
                 let mut s = session_up.lock();
-                s.streams.get_mut(stream_id).map(|r| r.record_out(n));
+                if let Some(r) = s.streams.get_mut(stream_id) { r.record_out(n) };
             }
             stats_up.add_up(n as u64);
             logger_up.record_data_out(stream_id as u16, seq, n, 0, None);
@@ -956,7 +948,7 @@ impl Tunnel {
 
             {
                 let mut locked = ws_writer.lock().await;
-                if locked.send(tungstenite::Message::Binary(frame.into())).await.is_err() { break; }
+                if locked.send(tungstenite::Message::Binary(frame)).await.is_err() { break; }
             }
         }
 
@@ -964,7 +956,7 @@ impl Tunnel {
         {
             let mut locked = ws_writer.lock().await;
             let close_frame = vec![FRAME_CLOSE];
-            let _ = locked.send(tungstenite::Message::Binary(close_frame.into())).await;
+            let _ = locked.send(tungstenite::Message::Binary(close_frame)).await;
             let _ = locked.close().await;
         }
 
@@ -1023,7 +1015,7 @@ impl Tunnel {
 
                         {
                             let mut s = session_h3.lock();
-                            s.streams.get_mut(stream_id).map(|r| r.record_in(actual_len));
+                            if let Some(r) = s.streams.get_mut(stream_id) { r.record_in(actual_len) };
                         }
                         logger_h3.record_data_in(stream_id as u16, seq, actual_len, None);
                         seq += 1;
@@ -1078,7 +1070,7 @@ impl Tunnel {
 
             {
                 let mut s = session_tcp.lock();
-                s.streams.get_mut(stream_id).map(|r| r.record_out(n));
+                if let Some(r) = s.streams.get_mut(stream_id) { r.record_out(n) };
             }
             logger_tcp.record_data_out(stream_id as u16, seq, n, 0, None);
             seq += 1;
@@ -1178,7 +1170,7 @@ impl Tunnel {
 
                         {
                             let mut s = session_down.lock();
-                            s.streams.get_mut(stream_id).map(|r| r.record_in(actual_len));
+                            if let Some(r) = s.streams.get_mut(stream_id) { r.record_in(actual_len) };
                         }
                         logger_down.record_data_in(stream_id as u16, seq, actual_len, None);
                         seq += 1;
@@ -1234,7 +1226,7 @@ impl Tunnel {
 
             {
                 let mut s = session_up.lock();
-                s.streams.get_mut(stream_id).map(|r| r.record_out(n));
+                if let Some(r) = s.streams.get_mut(stream_id) { r.record_out(n) };
             }
             logger_up.record_data_out(stream_id as u16, seq, n, 0, None);
             seq += 1;

@@ -29,6 +29,12 @@ pub struct SystemProxyManager {
     current: Arc<Mutex<Option<String>>>,
 }
 
+impl Default for SystemProxyManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SystemProxyManager {
     pub fn new() -> Self {
         Self {
