@@ -174,15 +174,35 @@ jobs:
         run: npx tauri build --bundles nsis,msi
         working-directory: gidy-client-gui
         shell: bash
+
+      - name: Debug – list bundle dir
+        shell: bash
+        run: |
+          echo "=== target/release/bundle ==="
+          find gidy-client-gui/src-tauri/target/release/bundle -type f 2>/dev/null || echo "(not found, trying other paths)"
+          echo "=== target/release/*.exe ==="
+          ls -la gidy-client-gui/src-tauri/target/release/*.exe 2>/dev/null || echo "(no exe in release)"
+          # Tauri may output under src-tauri/target or workspace target
+          echo "=== workspace target/release/bundle ==="
+          find target/release/bundle -type f 2>/dev/null || echo "(not found)"
+
       - name: Collect & hash installers
         shell: bash
         run: |
           mkdir -p /tmp/gui-windows
-          find target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" \) | while read f; do
-            base=$(basename "$f")
-            cp "$f" /tmp/gui-windows/
-            sha256sum "/tmp/gui-windows/$base" > "/tmp/gui-windows/$base.sha256"
+          # Search both possible locations
+          for dir in target/release/bundle gidy-client-gui/src-tauri/target/release/bundle; do
+            if [ -d "$dir" ]; then
+              find "$dir" -type f \( -name "*.exe" -o -name "*.msi" \) | while read f; do
+                base=$(basename "$f")
+                cp "$f" /tmp/gui-windows/
+                sha256sum "/tmp/gui-windows/$base" > "/tmp/gui-windows/$base.sha256"
+                echo "collected: $base"
+              done
+            fi
           done
+          echo "=== files in /tmp/gui-windows ==="
+          ls -la /tmp/gui-windows/
       - uses: actions/upload-artifact@v4
         with:
           name: gui-windows
